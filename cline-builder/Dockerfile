@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python dependencies (use --break-system-packages for Debian 12+)
 RUN pip3 install --break-system-packages httpx
 
+# Install modern uv package and project manager
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
 # Install cline cli globally
 RUN npm install -g cline
 

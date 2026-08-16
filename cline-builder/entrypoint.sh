@@ -288,6 +288,27 @@ echo "🌿 Setting up git safety net..."
 setup_git_safety || true
 
 # =============================================================================
+# LOG CLEANER (Strip ANSI escape codes for clean plain-text logs)
+# =============================================================================
+clean_log_file() {
+    local log_file="$1"
+    if [ -f "$log_file" ]; then
+        python3 -c "
+import re, sys
+path = sys.argv[1]
+try:
+    with open(path, 'rb') as f:
+        content = f.read().decode('utf-8', 'ignore')
+    clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\([A-Za-z0-9]|\x1b[=>]|\r', '', content)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(clean)
+except Exception:
+    pass
+" "$log_file" 2>/dev/null || true
+    fi
+}
+
+# =============================================================================
 # SESSION STATE GENERATOR (Component 3)
 # =============================================================================
 generate_session_state() {
@@ -431,6 +452,8 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
     CLINE_EXIT=$?
     set -e
 
+    clean_log_file "/workspace/.cline_logs/build_log_iter_${ITERATION}.txt"
+
     echo "  ↳ Cline exited with code ${CLINE_EXIT}"
 
     # Post-build size check
@@ -447,7 +470,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
     [STABILITY PROTOCOL]: Do not start by reading the entire codebase. Run the project's primary test suite immediately (check the TOOLCHAIN block in .clinerules for the correct command). Use the failures to identify which files actually need inspection.
     1) Verify all tasks from .clinerules are implemented and the code runs as expected. 
     2) [QUALITY RECONCILIATION]: Read '.cline_context/quality_audit.md'. If current implementation has resolved any of these critiques, REMOVE them from the file.
-    3) MUST DO: Create a 'README.md' file that clearly explains what the project is and EXACTLY how to run it. 
+    3) MUST DO: Create a 'README.md' file that clearly explains what the project is and EXACTLY how to run it (for Python projects, prioritize clean, modern uv commands like 'uv run <cmd>' and 'uv run pytest'). 
     4) Check if '.cline_context/.build_issues.md' already exists. If it does, READ it. Cross off or remove the issues that were fixed in this iteration.
     5) If the app is 100% working, safe, and has a README, create a file named '.build_complete' in the root directory containing 'VERIFIED'.
     6) CONTINUITY: Watch for '[STABILITY MONITOR]' markers in history. If a turn was cut off, do not re-read from the beginning; pick up exactly where you left off.
@@ -463,6 +486,8 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
         "$VERIFY_MSG"' \
         "/workspace/.cline_logs/verify_log_iter_${ITERATION}.txt"
     set -e
+
+    clean_log_file "/workspace/.cline_logs/verify_log_iter_${ITERATION}.txt"
 
     # --- Safety Phase ---
     echo "  🛡️ Running Cline (Safety audit)..."
@@ -487,6 +512,8 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
         "$SAFETY_MSG"' \
         "/workspace/.cline_logs/safety_log_iter_${ITERATION}.txt"
     set -e
+
+    clean_log_file "/workspace/.cline_logs/safety_log_iter_${ITERATION}.txt"
 
     # --- Check completion ---
     if [ -f "/workspace/.build_complete" ]; then

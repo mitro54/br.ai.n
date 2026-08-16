@@ -1961,6 +1961,9 @@ def _check_build_logs() -> str:
         if not logs_output:
             logs_output = "[No logs generated yet or container is empty]"
 
+        # Strip ANSI escape sequences, color codes, and carriage returns
+        logs_output = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\([A-Za-z0-9]|\x1b[=>]|\r", "", logs_output)
+
         if len(logs_output) > 3000:
             logs_output = "... [truncated]\n" + logs_output[-3000:]
 

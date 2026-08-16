@@ -523,10 +523,11 @@ def select_relevant_kb(kb_dir: str, instruction: str, max_chars: int = 100000) -
 def detect_project_toolchain(project_dir: str) -> str:
     """Detect language, package manager, test runner, and formatter from project markers."""
     markers = {
-        "pyproject.toml":   {"lang": "Python", "pkg": "poetry/pip", "fmt": "black/ruff", "test": "pytest"},
-        "setup.py":         {"lang": "Python", "pkg": "pip", "fmt": "black", "test": "pytest"},
-        "requirements.txt": {"lang": "Python", "pkg": "pip", "fmt": "black", "test": "pytest"},
-        "Pipfile":          {"lang": "Python", "pkg": "pipenv", "fmt": "black", "test": "pytest"},
+        "uv.lock":          {"lang": "Python", "pkg": "uv", "fmt": "ruff", "test": "uv run pytest"},
+        "pyproject.toml":   {"lang": "Python", "pkg": "uv", "fmt": "ruff", "test": "uv run pytest"},
+        "setup.py":         {"lang": "Python", "pkg": "uv / pip", "fmt": "ruff", "test": "uv run pytest"},
+        "requirements.txt": {"lang": "Python", "pkg": "uv pip / pip", "fmt": "ruff", "test": "uv run pytest"},
+        "Pipfile":          {"lang": "Python", "pkg": "uv / pipenv", "fmt": "ruff", "test": "uv run pytest"},
         "package.json":     {"lang": "JavaScript/TypeScript", "pkg": "npm/yarn", "fmt": "prettier", "test": "jest/vitest"},
         "tsconfig.json":    {"lang": "TypeScript", "pkg": "npm", "fmt": "prettier", "test": "jest"},
         "Cargo.toml":       {"lang": "Rust", "pkg": "cargo", "fmt": "rustfmt", "test": "cargo test"},
