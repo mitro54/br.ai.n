@@ -1,12 +1,12 @@
 # =============================================================================
-# Qwen 3.8 / 3.5 27B Optimized Modelfile (65k Context for 24GB VRAM)
+# Qwen 3.8 27B Optimized Modelfile (65k Context for 24GB VRAM)
 # =============================================================================
 #
 # This Modelfile builds an optimized expert model tuned for 24GB VRAM GPUs
 # (RTX 3090 / 4090 / 5090) with a 65,536 token context window and custom sampling.
 #
 # Prerequisites:
-#   ollama pull qwen3.5:27b
+#   ollama pull qwen3.8:27b
 #
 # Build:
 #   ollama create qwen3.8opt:latest -f Modelfile.qwen38opt
@@ -15,7 +15,7 @@
 #   ollama show qwen3.8opt:latest --parameters
 # =============================================================================
 
-FROM qwen3.5:27b
+FROM qwen3.8:27b
 
 # Context and Batch Optimization (65k context fits in 24GB VRAM)
 PARAMETER num_ctx 65536

@@ -112,7 +112,7 @@ This flow illustrates the VRAM safety logic when the LLM triggers a heavy tool (
 7. **Release:** Orchestrator releases the lock. The system returns to the Resident Orchestrator baseline.
 8. **Periodic Sweep**: A background task sweeps idle ComfyUI RAM/VRAM every 5 minutes.
 9. **Project Extraction (`!move`)**: The `mover.py` module parses conversation history to reconstruct file systems. It uses regex-based extraction to separate code from commands and sanitizes paths (clears `..`) to ensure they stay within the guest-workspace boundary.
-10. **Dynamic Settings Fallback**: The Orchestrator applies specialized `temperature` and `presence_penalty` values only to the default `qwen3.5:27b` model. For any third-party expert model, it reverts to standard defaults to ensure stability.
+10. **Dynamic Settings Fallback**: The Orchestrator applies specialized `temperature` and `presence_penalty` values only to the default `qwen3.8:27b` (or `qwen3.8opt:latest`) model. For any third-party expert model, it reverts to standard defaults to ensure stability.
 
 ---
 

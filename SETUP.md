@@ -53,7 +53,7 @@ nvidia-smi
    ollama pull qwen2.5:1.5b
 
    # Pull the base 27B model
-   ollama pull qwen3.5:27b
+   ollama pull qwen3.8:27b
 
    # Create the optimized 65k context Expert model (recommended for 24GB VRAM)
    ollama create qwen3.8opt:latest -f Modelfile.qwen38opt
@@ -192,7 +192,7 @@ gpu_lock = asyncio.Lock()
 
 # Model Configs
 ROUTER_MODEL = "qwen2.5:1.5b"
-EXPERT_MODEL = "qwen3.5:27b"
+EXPERT_MODEL = "qwen3.8:27b"
 OLLAMA_URL = "http://localhost:11434"
 COMFYUI_URL = "http://localhost:8188"
 WORKFLOW_PATH = "workflow_api.json"

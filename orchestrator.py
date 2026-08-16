@@ -60,7 +60,7 @@ PARAMS_GENERAL = {
     "top_p": 0.95,
     "top_k": 20,
     "min_p": 0.0,
-    "presence_penalty": 1.5,
+    "presence_penalty": 0.0,
     "repeat_penalty": 1.0,
 }
 
@@ -135,7 +135,7 @@ def _adapt_body(body: dict, config: dict) -> dict:
 
     # Map Ollama `options` to top-level OpenAI parameters
     options = body.get("options", {})
-    for key in ("temperature", "top_p", "presence_penalty", "frequency_penalty"):
+    for key in ("temperature", "top_p", "top_k", "min_p", "presence_penalty", "frequency_penalty", "repeat_penalty"):
         if key in options:
             adapted[key] = options[key]
 

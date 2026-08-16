@@ -185,7 +185,7 @@ MAX_SIZE_MB=$(jq -r '.limits.max_project_size_mb // 2048' "$CONFIG_PATH")
 MAX_ITERATIONS=$(jq -r '.limits.max_build_iterations // 5' "$CONFIG_PATH")
 CLINE_MAX_TURNS=$(jq -r '.limits.cline_max_turns // 100' "$CONFIG_PATH")
 # Extract cline model: handle both string ("model_name") and object ({"model": "..."}) formats
-CLINE_MODEL=$(jq -r 'if (.models.cline | type) == "object" then .models.cline.model else (.models.cline // "qwen3.5:27b") end' "$CONFIG_PATH")
+CLINE_MODEL=$(jq -r 'if (.models.cline | type) == "object" then .models.cline.model else (.models.cline // "qwen3.8:27b") end' "$CONFIG_PATH")
 CLINE_PROVIDER=$(jq -r 'if (.models.cline | type) == "object" then (.models.cline.provider // "ollama") else "ollama" end' "$CONFIG_PATH")
 CLINE_BASE_URL=$(jq -r --arg dh "$DEFAULT_HOST" 'if (.models.cline | type) == "object" then (.models.cline.base_url // $dh) else $dh end' "$CONFIG_PATH")
 CLINE_STARTUP_RAW=$(jq -r '.cline_startup_message // "Read .clinerules and execute all tasks."' "$CONFIG_PATH")
