@@ -47,10 +47,16 @@ nvidia-smi
 ## Phase 2: The LLM Engine (Ollama Configuration)
 
 1. **Verify Ollama Installation:** Ensure the Ollama service is running in WSL2. 
-2. **Pull models:** Ensure the resident router and expert models are present.
+2. **Pull and build models:** Ensure the resident router and optimized expert models are present.
    ```bash
+   # Pull the resident router model
    ollama pull qwen2.5:1.5b
-   ollama pull qwen3.5:27b  # Or qwen2.5:7b for smaller GPUs
+
+   # Pull the base 27B model
+   ollama pull qwen3.5:27b
+
+   # Create the optimized 65k context Expert model (recommended for 24GB VRAM)
+   ollama create qwen3.8opt:latest -f Modelfile.qwen38opt
    ```
 
 3. **Apply VRAM Guardrail:** You must set the environment variable globally in the Ollama systemd service to ensure models drop from memory.

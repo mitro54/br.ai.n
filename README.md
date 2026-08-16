@@ -134,8 +134,14 @@ Before configuring models, ensure the provider you want to use is installed:
 # Install (if not already)
 curl -fsSL https://ollama.com/install.sh | sh
 
-# Pull a model
-ollama pull gemma4:26b
+# 1. Pull the fast resident router model
+ollama pull qwen2.5:1.5b
+
+# 2. Pull the base 27B model
+ollama pull qwen3.5:27b
+
+# 3. Create the optimized 65k context Expert model (recommended for 24GB VRAM)
+ollama create qwen3.8opt:latest -f Modelfile.qwen38opt
 
 # Verify it's running
 curl http://localhost:11434/api/tags
@@ -143,6 +149,7 @@ curl http://localhost:11434/api/tags
 - **Default port:** `11434`
 - **API format:** Ollama native + OpenAI-compatible (`/v1/chat/completions`)
 - **Model management:** Automatic (loads on first request, unloads via `keep_alive`)
+- **Included Modelfile:** `Modelfile.qwen38opt` configures `qwen3.8opt:latest` with a 65,536 token context window and custom sampling to fit perfectly within 24GB VRAM.
 </details>
 
 <details>
@@ -203,7 +210,7 @@ At the top of `orchestrator.py`, configure which model and provider to use for t
 ```python
 # --- STRICT MODEL CONFIG ---
 EXPERT_CONFIG = {
-    "model": "gemma4:26b",        # Model name (Ollama tag, LMS identifier, or HF repo)
+    "model": "qwen3.8opt:latest",  # Model name (Ollama tag, LMS identifier, or HF repo)
     "provider": "ollama",          # "ollama", "lmstudio", or "llamacpp"
     "base_url": "http://localhost:11434",  # API endpoint
 }
@@ -266,9 +273,9 @@ EXPERT_CONFIG = {
 #### Context Windows
 
 ```python
-EXPERT_CTX = 24576   # Context window for expert chat tasks
-DISTILL_CTX = 32768  # Context for the distillation engine (Thinking)
-CLINE_CTX = 32768    # Context for the Cline agent (Building)
+EXPERT_CTX = 65536   # Context window for expert chat tasks (65k)
+DISTILL_CTX = 65536  # Context for the distillation engine (65k)
+CLINE_CTX = 65536    # Context for the Cline agent (65k)
 ```
 
 ---
