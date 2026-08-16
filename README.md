@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mitro54/br.ai.n/actions/workflows/ci.yml/badge.svg)](https://github.com/mitro54/br.ai.n/actions/workflows/ci.yml)
 
-Bob the Builder, Bob Ross or even Uncle Bob, any way works. If you truly want to, Bob can also be your b.r.ai.n; a fully autonomous software factory just from a conversation, all locally.
+Bob the Builder, Bob Ross or even Uncle Bob, any way works. If you truly want to, Bob can also be your br.ai.n; a fully autonomous software factory just from a conversation, all locally.
 
 **br.ai.n** is an **Agentic Local AI Orchestrator** powered by **Bob**, a unified AI persona running on your local hardware. Bob manages a tiered orchestration system on a single NVIDIA GPU (24GB+ VRAM), providing instant responses for simple tasks while dynamically routing complex requests (Coding, Vision, Image Generation) to expert models.
 
