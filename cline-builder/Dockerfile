@@ -23,9 +23,10 @@ RUN npm install -g cline
 # Set up application directory
 WORKDIR /app
 
-# Copy pipeline scripts and safe CLI tools
+# Copy pipeline scripts, prompts, and safe CLI tools
 COPY entrypoint.sh /app/entrypoint.sh
 COPY distill.py /app/distill.py
+COPY prompts/ /app/prompts/
 COPY tools/web_search.py /usr/local/bin/web-search
 COPY tools/fetch_page.py /usr/local/bin/fetch-page
 RUN chmod +x /app/entrypoint.sh /usr/local/bin/web-search /usr/local/bin/fetch-page

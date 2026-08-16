@@ -50,6 +50,7 @@ services:
     volumes:
       - ./conversations:/workspace
       - ./cline-builder/agent_config.json:/app/agent_config.json:ro
+      - ./cline-builder/prompts:/app/prompts:ro
     environment:
       - OLLAMA_HOST=http://host.docker.internal:11434
       - AGENT_CONFIG_PATH=/app/agent_config.json

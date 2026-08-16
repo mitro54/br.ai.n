@@ -92,6 +92,7 @@ A high-level overview of the **br.ai.n** workspace and its core components:
 ├── cline-builder/           # 🔨 Autonomous Build Pipeline (The "Factory")
 │   ├── distill.py           #   - 4-Pass Thinking Engine (Architect -> Engineer -> etc.)
 │   ├── agent_config.json    #   - Factory Configuration (Models, Prompts, Limits)
+│   ├── prompts/             #   - Markdown Prompts (Architect, Engineer, Test, Safety, Cline)
 │   ├── Dockerfile           #   - Pipeline Environment
 │   └── entrypoint.sh        #   - Autonomous Build Execution Flow
 ├── searxng/                 # 🔍 Search Engine Configuration
@@ -315,7 +316,14 @@ The autonomous factory supports the same multi-provider system. Each agent in th
             "base_url": "http://host.docker.internal:11434"
         }
     },
-    "ollama_host": "http://host.docker.internal:11434"
+    "ollama_host": "http://host.docker.internal:11434",
+    "prompts": {
+        "architect": "prompts/architect.md",
+        "engineer": "prompts/engineer.md",
+        "test_engineer": "prompts/test_engineer.md",
+        "safety": "prompts/safety.md"
+    },
+    "cline_startup_message": "prompts/cline_startup.md"
 }
 ```
 
@@ -334,7 +342,7 @@ For backward compatibility, simple strings still work and default to Ollama:
 ```
 
 #### System Prompts & Logic
-Tune the behavior of each agent by editing the prompts in the `cline-builder/distill.py`. This allows you to define strict rules, output formats, and operational constraints for the Architect, Engineer, and other expert roles. From `cline-builder/entrypoint.sh` you can configure the Cline's part of the pipeline like the task prompts etc.
+Tune the behavior of each agent by editing the Markdown prompt files in `cline-builder/prompts/` (e.g. `architect.md`, `engineer.md`, `test_engineer.md`, `safety.md`, and `cline_startup.md`). These paths are configured in `cline-builder/agent_config.json`, allowing you to define strict rules, output formats, and operational constraints for each role in clean, dedicated markdown files without cluttering JSON configuration. From `cline-builder/entrypoint.sh` you can configure the Cline's part of the pipeline like the task prompts etc.
 
 #### Rounds & Limits
 Control the depth of the build process and safety guardrails:

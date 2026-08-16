@@ -188,7 +188,17 @@ CLINE_MAX_TURNS=$(jq -r '.limits.cline_max_turns // 100' "$CONFIG_PATH")
 CLINE_MODEL=$(jq -r 'if (.models.cline | type) == "object" then .models.cline.model else (.models.cline // "qwen3.5:27b") end' "$CONFIG_PATH")
 CLINE_PROVIDER=$(jq -r 'if (.models.cline | type) == "object" then (.models.cline.provider // "ollama") else "ollama" end' "$CONFIG_PATH")
 CLINE_BASE_URL=$(jq -r --arg dh "$DEFAULT_HOST" 'if (.models.cline | type) == "object" then (.models.cline.base_url // $dh) else $dh end' "$CONFIG_PATH")
-CLINE_STARTUP=$(jq -r '.cline_startup_message // "Read .clinerules and execute all tasks."' "$CONFIG_PATH")
+CLINE_STARTUP_RAW=$(jq -r '.cline_startup_message // "Read .clinerules and execute all tasks."' "$CONFIG_PATH")
+CONFIG_DIR="$(dirname "$CONFIG_PATH")"
+if [ -f "$CLINE_STARTUP_RAW" ]; then
+    CLINE_STARTUP=$(cat "$CLINE_STARTUP_RAW")
+elif [ -f "${CONFIG_DIR}/${CLINE_STARTUP_RAW}" ]; then
+    CLINE_STARTUP=$(cat "${CONFIG_DIR}/${CLINE_STARTUP_RAW}")
+elif [ -f "/app/${CLINE_STARTUP_RAW}" ]; then
+    CLINE_STARTUP=$(cat "/app/${CLINE_STARTUP_RAW}")
+else
+    CLINE_STARTUP="$CLINE_STARTUP_RAW"
+fi
 
 # --- Project Size Check ---
 check_project_size() {
