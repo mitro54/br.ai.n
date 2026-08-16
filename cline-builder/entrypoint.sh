@@ -183,7 +183,7 @@ fi
 # --- Read Config ---
 MAX_SIZE_MB=$(jq -r '.limits.max_project_size_mb // 2048' "$CONFIG_PATH")
 MAX_ITERATIONS=$(jq -r '.limits.max_build_iterations // 5' "$CONFIG_PATH")
-CLINE_MAX_TURNS=$(jq -r '.limits.cline_max_turns // 100' "$CONFIG_PATH")
+CLINE_MAX_RETRIES=$(jq -r '.limits.cline_max_retries // .limits.cline_max_turns // 6' "$CONFIG_PATH")
 # Extract cline model: handle both string ("model_name") and object ({"model": "..."}) formats
 CLINE_MODEL=$(jq -r 'if (.models.cline | type) == "object" then .models.cline.model else (.models.cline // "qwen3.8:27b") end' "$CONFIG_PATH")
 CLINE_PROVIDER=$(jq -r 'if (.models.cline | type) == "object" then (.models.cline.provider // "ollama") else "ollama" end' "$CONFIG_PATH")
@@ -341,7 +341,7 @@ echo "   Output: /workspace"
 echo "========================================="
 echo "  Model:          ${CLINE_MODEL}"
 echo "  Max iterations: ${MAX_ITERATIONS}"
-echo "  Max turns/iter: ${CLINE_MAX_TURNS}"
+echo "  Max retries: ${CLINE_MAX_RETRIES}"
 echo ""
 
 # --- Phase 2 Setup: Auto-Auth for CLI ---
@@ -389,10 +389,11 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
     fi
 
     set +e
-    export CLINE_BIN CLINE_MODEL CURRENT_TIMEOUT BUILD_MSG
+    export CLINE_BIN CLINE_MODEL CLINE_MAX_RETRIES CURRENT_TIMEOUT BUILD_MSG
     script -q -e -c '"$CLINE_BIN" -v --auto-approve true \
         -P openai-compatible \
         -m "$CLINE_MODEL" \
+        --retries "$CLINE_MAX_RETRIES" \
         --timeout "$CURRENT_TIMEOUT" \
         "$BUILD_MSG"' \
         "/workspace/.cline_logs/build_log_iter_${ITERATION}.txt"
@@ -421,10 +422,11 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
     6) CONTINUITY: Watch for '[STABILITY MONITOR]' markers in history. If a turn was cut off, do not re-read from the beginning; pick up exactly where you left off.
     7) Before testing, if a port is in use, YOU MUST ONLY use 'npx kill-port <portnumber>' to free it."
     set +e
-    export CLINE_BIN CLINE_MODEL VERIFY_MSG
+    export CLINE_BIN CLINE_MODEL CLINE_MAX_RETRIES VERIFY_MSG
     script -q -e -c '"$CLINE_BIN" -v --auto-approve true \
         -P openai-compatible \
         -m "$CLINE_MODEL" \
+        --retries "$CLINE_MAX_RETRIES" \
         --timeout 1800 \
         "$VERIFY_MSG"' \
         "/workspace/.cline_logs/verify_log_iter_${ITERATION}.txt"
@@ -443,10 +445,11 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
     5) Before testing, if a port is in use, YOU MUST ONLY use 'npx kill-port <portnumber>' to free it.
     NON-INTERACTIVE MODE: Do not ask for user input. If safety issues are found, perform remediation autonomously."
     set +e
-    export CLINE_BIN CLINE_MODEL SAFETY_MSG
+    export CLINE_BIN CLINE_MODEL CLINE_MAX_RETRIES SAFETY_MSG
     script -q -e -c '"$CLINE_BIN" -v --auto-approve true \
         -P openai-compatible \
         -m "$CLINE_MODEL" \
+        --retries "$CLINE_MAX_RETRIES" \
         --timeout 1800 \
         "$SAFETY_MSG"' \
         "/workspace/.cline_logs/safety_log_iter_${ITERATION}.txt"

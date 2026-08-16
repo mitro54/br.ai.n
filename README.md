@@ -347,14 +347,14 @@ Tune the behavior of each agent by editing the Markdown prompt files in `cline-b
 #### Rounds & Limits
 Control the depth of the build process and safety guardrails:
 -   **max_build_iterations**: The number of **rounds** (4-pass cycles) the pipeline will attempt to complete the project.
--   **cline_max_turns**: The maximum number of tool calls the Cline agent can make per round.
+-   **cline_max_retries**: The maximum number of consecutive mistakes/errors the Cline agent is allowed before exiting and yielding to the outer iteration loop for recovery (default: 6).
 -   **context_window**: Manage the total token capacity for the pipeline.
 
 ```json
 "limits": {
     "max_project_size_mb": 4096,
     "max_build_iterations": 5,
-    "cline_max_turns": 30
+    "cline_max_retries": 6
 }
 ```
 

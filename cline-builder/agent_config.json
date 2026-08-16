@@ -20,6 +20,6 @@
     "limits": {
         "max_project_size_mb": 4096,
         "max_build_iterations": 5,
-        "cline_max_turns": 100
+        "cline_max_retries": 6
     }
 }
