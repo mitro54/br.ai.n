@@ -245,16 +245,17 @@ rm -f /workspace/.build_complete
 # GIT SAFETY NET (Component 7)
 # =============================================================================
 setup_git_safety() {
-    cd /workspace
+    cd /workspace 2>/dev/null || return 0
+    git config --global --add safe.directory '*' 2>/dev/null || true
     
     # Try to initialize if missing, but don't fail if we can't
     if [ ! -d ".git" ]; then
         # Project has no git — initialize for local snapshot only
         if git init -q 2>/dev/null; then
-            git config user.email "builder@local"
-            git config user.name "Cline Builder"
-            git add -A 2>/dev/null
-            git commit -q -m "snapshot: pre-build state" 2>/dev/null
+            git config user.email "builder@local" 2>/dev/null || true
+            git config user.name "Cline Builder" 2>/dev/null || true
+            git add -A 2>/dev/null || true
+            git commit -q -m "snapshot: pre-build state" 2>/dev/null || true
             echo "  📸 Created local snapshot (no remote, no pushing)"
         else
             echo "  ⚠️ Skipping git safety net (not a repository and cannot initialize)"
@@ -264,21 +265,27 @@ setup_git_safety() {
     
     # Final check to ensure we are in a working tree
     if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "  ⚠️ Not inside a git work tree, continuing without branching"
         return 0
     fi
     
     # Always work on a branch, never on main/master
-    local MAIN_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
+    local MAIN_BRANCH="main"
+    MAIN_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || git branch --show-current 2>/dev/null || echo "main")
     local BRANCH_NAME="agent/build-$(date +%s)"
-    git checkout -b "$BRANCH_NAME" 2>/dev/null || true
-    echo "  🌿 Working on branch: ${BRANCH_NAME} (based on ${MAIN_BRANCH})"
-    echo "  💡 To review: git diff ${MAIN_BRANCH}"
-    echo "  💡 To rollback: git checkout ${MAIN_BRANCH}"
+    if git checkout -b "$BRANCH_NAME" 2>/dev/null; then
+        echo "  🌿 Working on branch: ${BRANCH_NAME} (based on ${MAIN_BRANCH})"
+        echo "  💡 To review: git diff ${MAIN_BRANCH}"
+        echo "  💡 To rollback: git checkout ${MAIN_BRANCH}"
+    else
+        echo "  🌿 Continuing on current branch"
+    fi
+    return 0
 }
 
 echo ""
 echo "🌿 Setting up git safety net..."
-setup_git_safety
+setup_git_safety || true
 
 # =============================================================================
 # SESSION STATE GENERATOR (Component 3)

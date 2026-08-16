@@ -574,3 +574,12 @@ To ensure optimal performance and prevent VRAM fragmentation, you must install t
 5. Set the **Model Name** to `flux-2-klein-9b-fp8.safetensors`.
 6. Upload the provided `flux2api.json` workflow file in the same settings area.
 7. Under **ComfyUI Workflow Nodes**, ensure the **Text Input** is mapped to **Node ID 4**.
+
+---
+
+## 📄 License
+
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. 
+- You are free to use, study, modify, and distribute this software.
+- Any forks, modifications, or derivative works **must** also remain open source and freely available under the same GPL-3.0 license.
+See the [LICENSE](LICENSE) file for the full license text.
