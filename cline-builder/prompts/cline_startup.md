@@ -5,8 +5,10 @@
 - **FIRST ACTION**: Read `.cline_context/.session_state.md` to recover your memory, previous iteration context, and known issues before taking any other action.
 
 #### 2. Research & Documentation Tools
-- **WEB RESEARCH**: When you need framework documentation, API signatures, or modern syntax examples, execute `web-search "<query>"` in the terminal (uses local SearXNG).
-- **PAGE FETCHING**: To inspect documentation from any URL, execute `fetch-page "<url>"`.
+- **WEB & DOCS RESEARCH**: Use native MCP tool `searxng_web_search` or run `web-search "<query>"` in the terminal (uses private local SearXNG).
+- **PAGE FETCHING**: Use native MCP tool `fetch_web_page` or run `fetch-page "<url>"` in the terminal to inspect documentation.
+- **KNOWLEDGE BASE**: Use native MCP tool `search_knowledge_base` or run `kb-search "<query>"` to look up patterns in `.knowledge_base/`.
+- **FAST CODE SEARCH**: Use `rg` (ripgrep) and `fd` for ultra-fast, gitignore-aware file and pattern searching.
 
 #### 3. TDD-First & Probe Development Loop
 - **PROBE BEFORE IMPLEMENTING**: Do not implement unverified logic. Follow the tight development cycle:

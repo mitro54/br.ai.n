@@ -1086,7 +1086,7 @@ async def proxy_ollama(request: Request):
             asyncio.create_task(free_comfyui())
 
         # Rule E: Suppress background tasks following maintenance commands
-        maintenance_commands = ["!status", "!stop", "!move", "!build", "!lock", "!unlock"]
+        maintenance_commands = ["!status", "!stop", "!move", "!build", "!lock", "!unlock", "!doctor"]
         is_maintenance_followup = False
         if is_background_task and len(messages) >= 3:
             prev_user_msg = messages[-3].get("content", "").lower() if messages[-3].get("role") == "user" else ""
@@ -1152,6 +1152,10 @@ async def proxy_ollama(request: Request):
             logger.info("Command: Logs check triggered.")
             logs_msg = _check_build_logs()
             return _command_response(logs_msg, is_streaming, is_native)
+        elif "!doctor" in prompt_lower:
+            logger.info("Command: Doctor diagnostic check triggered.")
+            doctor_msg = await _handle_doctor_command()
+            return _command_response(doctor_msg, is_streaming, is_native)
 
     # 4. Request Orchestration
     try:
@@ -2093,6 +2097,119 @@ def _stop_build_pipeline() -> str:
         return f"🛑 **Stopped and cleared {len(containers)} build pipeline(s).**"
     except (subprocess.SubprocessError, OSError) as e:
         return f"❌ **Stop Command Failed:** {e}"
+
+
+async def _handle_doctor_command() -> str:
+    """
+    Performs a comprehensive diagnostic health check across the entire workspace:
+    - GPU & VRAM Status (nvidia-smi)
+    - GPU Mutex & Memory Locks
+    - LLM Provider Services (Ollama, llama-server, LM Studio)
+    - Image Generation (ComfyUI)
+    - Search Engine (SearXNG)
+    - Core Docker Containers
+    """
+    report = ["🩺 **Bob Workspace Doctor: System Diagnostics**\n"]
+
+    # 1. GPU & Hardware Status
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "nvidia-smi", "--query-gpu=name,memory.total,memory.used,memory.free,temperature.gpu,utilization.gpu",
+            "--format=csv,noheader,nounits",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode == 0 and stdout.strip():
+            gpu_name, total_mem, used_mem, free_mem, temp, util = [x.strip() for x in stdout.decode().split(",")]
+            used_gb = float(used_mem) / 1024
+            total_gb = float(total_mem) / 1024
+            report.append(f"**GPU Hardware:** ✅ `{gpu_name}` ({temp}°C, {util}% Load)")
+            report.append(f"- **VRAM Usage:** `{used_gb:.1f} GB` / `{total_gb:.1f} GB` ({free_mem} MB Free)")
+        else:
+            report.append("**GPU Hardware:** ⚠️ `nvidia-smi` returned non-zero or empty.")
+    except Exception as e:  # noqa: BLE001
+        report.append(f"**GPU Hardware:** ⚠️ Not detected or error: {e}")
+
+    # Mutex & VRAM Locks
+    lock_status = "🔒 Locked" if gpu_lock.locked() else "🔓 Available"
+    pers_status = "🔒 Pinned (vram_locked=True)" if vram_locked else "⚡ Auto-managed (time-sliced)"
+    warm_left = max(0, int(expert_warm_until - time.time()))
+    report.append(f"- **GPU Mutex:** `{lock_status}` | **VRAM Strategy:** `{pers_status}` (Warm: {warm_left}s)")
+    report.append("")
+
+    # 2. LLM Engine Check (Ollama / Managed)
+    report.append("**LLM Providers & Engines:**")
+    ollama_url = _get_base_url(EXPERT_CONFIG if _is_ollama_provider(EXPERT_CONFIG) else ROUTER_CONFIG)
+    try:
+        resp = await http_client.get(f"{ollama_url}/api/tags", timeout=3.0)
+        if resp.status_code == 200:
+            models = [m.get("name") for m in resp.json().get("models", [])]
+            ps_resp = await http_client.get(f"{ollama_url}/api/ps", timeout=2.0)
+            loaded = [m.get("name") for m in ps_resp.json().get("models", [])] if ps_resp.status_code == 200 else []
+            loaded_str = ", ".join(loaded) if loaded else "None (VRAM clear)"
+            report.append(f"- **Ollama (`{ollama_url}`):** ✅ Online ({len(models)} models installed)")
+            report.append(f"  - Active in VRAM: `{loaded_str}`")
+        else:
+            report.append(f"- **Ollama (`{ollama_url}`):** ⚠️ HTTP {resp.status_code}")
+    except Exception as e:  # noqa: BLE001
+        report.append(f"- **Ollama (`{ollama_url}`):** ❌ Unreachable ({e})")
+
+    if _managed_processes:
+        report.append("- **Managed llama-server:**")
+        for m_name, proc in _managed_processes.items():
+            alive = proc.poll() is None
+            status_icon = "✅ Running" if alive else f"❌ Exited ({proc.returncode})"
+            report.append(f"  - `{m_name}`: {status_icon}")
+
+    report.append("")
+
+    # 3. ComfyUI Check
+    report.append("**Media & Search Services:**")
+    try:
+        resp = await http_client.get(f"{COMFYUI_URL}/queue", timeout=3.0)
+        if resp.status_code == 200:
+            queue_data = resp.json()
+            running = len(queue_data.get("queue_running", []))
+            pending = len(queue_data.get("queue_pending", []))
+            report.append(f"- **ComfyUI (`{COMFYUI_URL}`):** ✅ Online (Queue: {running} running, {pending} pending)")
+        else:
+            report.append(f"- **ComfyUI (`{COMFYUI_URL}`):** ⚠️ HTTP {resp.status_code}")
+    except Exception:  # noqa: BLE001
+        report.append(f"- **ComfyUI (`{COMFYUI_URL}`):** ❌ Offline (Launch when needed for image generation)")
+
+    # 4. SearXNG Check
+    try:
+        resp = await http_client.get("http://localhost:8080", timeout=3.0)
+        if resp.status_code in [200, 302]:
+            report.append("- **SearXNG (`http://localhost:8080`):** ✅ Online")
+        else:
+            report.append(f"- **SearXNG (`http://localhost:8080`):** ⚠️ HTTP {resp.status_code}")
+    except Exception:  # noqa: BLE001
+        report.append("- **SearXNG (`http://localhost:8080`):** ❌ Offline")
+
+    report.append("")
+
+    # 5. Docker Containers Status
+    report.append("**Container Stack:**")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode == 0 and stdout.strip():
+            for line in stdout.decode().strip().split("\n"):
+                if "\t" in line:
+                    c_name, c_status = line.split("\t", 1)
+                    c_icon = "🟢" if "Up" in c_status else "⚪"
+                    report.append(f"- {c_icon} `{c_name}`: {c_status}")
+        else:
+            report.append("- ⚠️ No Docker containers found or Docker daemon unavailable.")
+    except Exception as e:  # noqa: BLE001
+        report.append(f"- ⚠️ Docker check failed: {e}")
+
+    report.append("\n**Commands:** `!build` (start factory), `!status` (check pipeline), `!lock` / `!unlock` (VRAM retention).")
+    return "\n".join(report)
 
 
 if __name__ == "__main__":

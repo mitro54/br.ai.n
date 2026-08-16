@@ -71,6 +71,7 @@ Bob isn't just a chatbot; Bob is a fully autonomous software factory. By combini
 -   `!status`: Check the status of active and recent build containers.
 -   `!logs`: Fetch and display the latest console logs from the active build pipeline.
 -   `!stop`: Force-stop all running build pipelines and clear VRAM.
+-   `!doctor`: Run a full diagnostic health check (GPU, VRAM, providers, containers).
 
 ---
 
@@ -517,6 +518,7 @@ While in chat, use these commands to override the orchestrator:
 - `!status`: Checks the status of active or recent build containers.
 - `!logs`: Fetches the latest terminal logs from the active background build pipeline.
 - `!stop`: Force-stops all running build pipelines.
+- `!doctor`: Runs comprehensive diagnostics (GPU/VRAM, Ollama, ComfyUI, SearXNG, Docker containers).
 - `!bob` / `hey bob`: Force the current turn to use the Fast Orchestrator.
 - `!expert` / `hey expert`: Force the current turn to use the Expert Model.
 

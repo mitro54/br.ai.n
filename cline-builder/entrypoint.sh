@@ -344,7 +344,30 @@ echo "  Max iterations: ${MAX_ITERATIONS}"
 echo "  Max retries: ${CLINE_MAX_RETRIES}"
 echo ""
 
-# --- Phase 2 Setup: Auto-Auth for CLI ---
+# --- Phase 2 Setup: MCP Server & Auto-Auth for CLI ---
+# Configure native MCP tools for Cline (SearXNG Web Search, Page Fetch, Knowledge Base)
+mkdir -p /root/.config/Cline/data/settings
+mkdir -p /root/.cline/data/settings
+
+cat << 'EOF' > /root/.config/Cline/data/settings/cline_mcp_settings.json
+{
+  "mcpServers": {
+    "brain-tools": {
+      "command": "python3",
+      "args": ["/app/mcp_server.py"],
+      "disabled": false,
+      "autoApprove": [
+        "searxng_web_search",
+        "fetch_web_page",
+        "search_knowledge_base"
+      ]
+    }
+  }
+}
+EOF
+cp /root/.config/Cline/data/settings/cline_mcp_settings.json /root/.cline/data/settings/cline_mcp_settings.json 2>/dev/null || true
+cp /root/.config/Cline/data/settings/cline_mcp_settings.json /root/.config/Cline/cline_mcp_settings.json 2>/dev/null || true
+
 # Determine the API base URL for Cline (always use /v1 for OpenAI-compatible auth)
 if [ "$CLINE_PROVIDER" = "ollama" ]; then
     CLINE_AUTH_URL="${CLINE_BASE_URL}/v1"
@@ -394,6 +417,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
         -P openai-compatible \
         -m "$CLINE_MODEL" \
         --retries "$CLINE_MAX_RETRIES" \
+        --compaction agentic \
         --timeout "$CURRENT_TIMEOUT" \
         "$BUILD_MSG"' \
         "/workspace/.cline_logs/build_log_iter_${ITERATION}.txt"
@@ -427,6 +451,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
         -P openai-compatible \
         -m "$CLINE_MODEL" \
         --retries "$CLINE_MAX_RETRIES" \
+        --compaction agentic \
         --timeout 1800 \
         "$VERIFY_MSG"' \
         "/workspace/.cline_logs/verify_log_iter_${ITERATION}.txt"
@@ -450,6 +475,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
         -P openai-compatible \
         -m "$CLINE_MODEL" \
         --retries "$CLINE_MAX_RETRIES" \
+        --compaction agentic \
         --timeout 1800 \
         "$SAFETY_MSG"' \
         "/workspace/.cline_logs/safety_log_iter_${ITERATION}.txt"

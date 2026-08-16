@@ -16,3 +16,5 @@ jobs:
         pip install ruff fastapi uvicorn httpx
     - name: Lint with Ruff
       run: ruff check .
+    - name: Run Mover & Extractor Tests
+      run: python test_advanced_mover.py
