@@ -11,11 +11,15 @@ Manages Ollama model loading/unloading between passes for VRAM safety.
 Isolates context between passes using Markdown boundaries.
 """
 
+import glob
 import json
 import os
-import time
-import httpx
+import re
+import subprocess
 import threading
+import time
+
+import httpx
 
 # --- Configuration ---
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://host.docker.internal:11434")
@@ -51,7 +55,7 @@ def resolve_prompt(prompt_val: str, config_path: str = CONFIG_PATH) -> str:
     if not prompt_val or not isinstance(prompt_val, str):
         return ""
 
-    if "\n" not in prompt_val and (prompt_val.endswith(".md") or prompt_val.endswith(".txt") or "/" in prompt_val):
+    if "\n" not in prompt_val and (prompt_val.endswith((".md", ".txt")) or "/" in prompt_val):
         candidates = [
             prompt_val,
             os.path.join(os.path.dirname(config_path), prompt_val),
@@ -67,7 +71,7 @@ def resolve_prompt(prompt_val: str, config_path: str = CONFIG_PATH) -> str:
                         content = f.read().strip()
                         if content:
                             return content
-                except Exception as e:
+                except (OSError, UnicodeDecodeError) as e:
                     print(f"  ⚠ Failed to read prompt file {candidate}: {e}")
     return prompt_val
 
@@ -89,7 +93,7 @@ def conversation_to_text(messages: list) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def _resolve_model_config(model_entry, default_host: str = None) -> dict:
+def _resolve_model_config(model_entry, default_host: str | None = None) -> dict:
     """
     Resolve a model entry from config into a normalized dict.
     Supports both legacy string format and new object format.
@@ -169,7 +173,7 @@ def unload_model(client: httpx.Client, model_config: dict):
             )
             print(f"  ↳ Unloaded model ({provider}): {model_name}")
         time.sleep(1)
-    except Exception as e:
+    except (httpx.HTTPError, OSError) as e:
         print(f"  ⚠ Failed to unload {model_name}: {e}")
 
 
@@ -182,8 +186,7 @@ def call_llm(client: httpx.Client, model_config, system_prompt: str, user_conten
     prior_tokens = len(prior_context) // CHARS_PER_TOKEN
     available_tokens = CONTEXT_WINDOW - RESERVED_TOKENS - prior_tokens
 
-    if available_tokens < 1000:
-        available_tokens = 1000
+    available_tokens = max(available_tokens, 1000)
 
     chunk_limit = min(available_tokens, TARGET_CHUNK_SIZE)
     chunks = chunk_text(user_content, chunk_limit)
@@ -202,7 +205,7 @@ def call_llm(client: httpx.Client, model_config, system_prompt: str, user_conten
     print(f"    ↳ Processing into {len(chunks)} parts...", flush=True)
     partial_results = []
 
-    # [FIX] A relaxed, generic system prompt for the chunks so it doesn't deadlock trying to fill out a template it doesn't have data for.
+    # A relaxed, generic system prompt for chunks to prevent template deadlocks.
     relaxed_chunk_system_prompt = (
         "You are acting as an information extractor. Your final formatting goal will be defined later. "
         "For now, review the provided text chunk and extract ANY raw technical details, facts, or logical "
@@ -225,7 +228,6 @@ def call_llm(client: httpx.Client, model_config, system_prompt: str, user_conten
         )
 
         print(f"    ↳ Preparing {part_label} (Payload: {len(chunk_prompt)} chars)...", flush=True)
-        # Use the relaxed prompt for the chunks
         result = _single_llm_call(client, model_config, relaxed_chunk_system_prompt, chunk_prompt, part_label)
         partial_results.append(result)
 
@@ -250,7 +252,7 @@ def call_llm(client: httpx.Client, model_config, system_prompt: str, user_conten
         partial_results = consolidated
         print(f"    ↳ Consolidated {len(buckets)} buckets into {len(consolidated)} summaries.", flush=True)
 
-    # Now we apply strict system prompt to the merged bullets
+    # Apply strict system prompt to the merged bullets
     merge_prompt = (
         "You previously extracted technical details from a larger conversation in parts. "
         "Below are the raw extracted bullet points.\n\n"
@@ -260,7 +262,6 @@ def call_llm(client: httpx.Client, model_config, system_prompt: str, user_conten
     for i, part in enumerate(partial_results):
         merge_prompt += f"#### EXTRACTED FACTS (PART {i + 1})\n{part}\n\n"
 
-    # Use the REAL system prompt here
     return _single_llm_call(client, model_config, system_prompt, merge_prompt, "Merging Parts")
 
 
@@ -314,11 +315,11 @@ def _single_llm_call(client: httpx.Client, model_config, system_prompt: str, use
     for attempt in range(max_retries):
         first_token_received = threading.Event()
 
-        def heartbeat():
+        def heartbeat(event: threading.Event = first_token_received):
             start_wait = time.time()
-            while not first_token_received.is_set():
+            while not event.is_set():
                 time.sleep(5)
-                if not first_token_received.is_set():
+                if not event.is_set():
                     elapsed = int(time.time() - start_wait)
                     print(f"      ↳ [Waiting for LLM... {elapsed}s]", flush=True)
 
@@ -345,18 +346,16 @@ def _single_llm_call(client: httpx.Client, model_config, system_prompt: str, use
                         if resp.status_code != 200:
                             first_token_received.set()
                             print("\n  ✗ LLM returned status", resp.status_code)
-                            # Read error if possible
                             try:
                                 err_body = resp.read().decode()
                                 print(f"    Error: {err_body[:200]}")
-                            except Exception:
+                            except (httpx.HTTPError, UnicodeDecodeError):
                                 pass
                             return f"[ERROR: LLM returned status {resp.status_code}]"
 
                         dot_count = 0
                         for line in resp.iter_lines():
                             # Stability Protocol: 60s hard budget per part (wall-clock time)
-                            # This must run REGARDLESS of whether we received a token or a heartbeat.
                             if time.time() - start_time > 60:
                                 if attempt < max_retries - 1:
                                     print(f"\n      ⚠ [STABILITY PROTOCOL] Analytical capacity exceeded (60s). Retrying part ({attempt+2}/{max_retries})...")
@@ -379,7 +378,6 @@ def _single_llm_call(client: httpx.Client, model_config, system_prompt: str, use
                                 done = chunk_data.get("done", False)
                             else:
                                 if not line.startswith("data: "):
-                                    # Handle orchestrator heartbeats and non-data SSE events
                                     continue
                                 if line == "data: [DONE]":
                                     break
@@ -388,8 +386,7 @@ def _single_llm_call(client: httpx.Client, model_config, system_prompt: str, use
                                     choices = chunk_data.get("choices", [{}])
                                     token = choices[0].get("delta", {}).get("content", "") if choices else ""
                                     done = choices[0].get("finish_reason") is not None if choices else False
-                                except Exception:
-                                    # Skip malformed chunks or internal proxy metadata
+                                except (json.JSONDecodeError, IndexError, KeyError, TypeError):
                                     continue
 
                             if token:
@@ -416,7 +413,6 @@ def _single_llm_call(client: httpx.Client, model_config, system_prompt: str, use
 
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as e:
             first_token_received.set()
-            # If we get a 'Server disconnected' or 'Remote protocol error', it's often transient
             is_reset = "RemoteProtocolError" in str(type(e)) or "disconnected" in str(e).lower()
 
             if attempt < max_retries - 1:
@@ -426,7 +422,7 @@ def _single_llm_call(client: httpx.Client, model_config, system_prompt: str, use
                 continue
             print(f"\n  ❌ LLM request failed after {max_retries} attempts: {e}")
             return f"[ERROR: {e}]"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             first_token_received.set()
             print(f"\n  ❌ Unexpected error: {e}")
             return f"[ERROR: {e}]"
@@ -439,7 +435,7 @@ def update_status(status: str):
     try:
         with open(STATUS_PATH, "w", encoding="utf-8") as f:
             f.write(status)
-    except Exception as e:
+    except OSError as e:
         print(f"  ⚠ Failed to update status file: {e}")
 
 
@@ -453,9 +449,6 @@ STOP_WORDS = {"the","a","an","is","it","to","and","or","of","in","on","for",
 
 def select_relevant_kb(kb_dir: str, instruction: str, max_chars: int = 100000) -> str:
     """Score and select only relevant KB files based on keyword matching."""
-    import glob
-    import re
-
     # 1. Extract keywords from instruction (3+ chars, not stop words)
     raw_words = re.findall(r'[a-zA-Z0-9_]+', instruction.lower())
     keywords = {w for w in raw_words if len(w) >= 3 and w not in STOP_WORDS}
@@ -484,7 +477,7 @@ def select_relevant_kb(kb_dir: str, instruction: str, max_chars: int = 100000) -
             for kw in keywords:
                 if kw in peek:
                     score += 5
-        except Exception:
+        except (OSError, UnicodeDecodeError):
             continue
 
         scored_files.append((score, md_file))
@@ -511,7 +504,7 @@ def select_relevant_kb(kb_dir: str, instruction: str, max_chars: int = 100000) -
                         f"### KB: {os.path.basename(path)} [TRUNCATED]\n{content[:remaining]}"
                     )
                     total_chars = max_chars
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 continue
         else:
             collateral_names.append(os.path.basename(path))
@@ -572,7 +565,6 @@ def detect_project_toolchain(project_dir: str) -> str:
 
 def get_symbol_skeleton(project_dir: str) -> str:
     """Matches class/function signatures AND imports to create a navigable project map."""
-    import re
     skeleton = ["[PROJECT SYMBOL SKELETON]"]
     signature_re = re.compile(
         r"^\s*(?:class|def|function|interface|type|async\s+function)\s+([a-zA-Z0-9_]+)",
@@ -623,7 +615,7 @@ def get_symbol_skeleton(project_dir: str) -> str:
                             return "\n".join(skeleton)
                         skeleton.append(block_str)
                         total_chars += len(block_str)
-                except Exception:
+                except (OSError, UnicodeDecodeError):
                     continue
     return "\n".join(skeleton)
 
@@ -646,7 +638,7 @@ def run_distillation():
             try:
                 with open(full_path, "r", encoding="utf-8") as f:
                     return f.read().strip()
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 pass
         return ""
 
@@ -657,13 +649,12 @@ def run_distillation():
     if is_rebuild:
         status_text = "ALREADY PARTIALLY IMPLEMENTED" if not has_git else "EXISTING REPOSITORY DETECTED"
         print(f"\n🔄 {status_text} for {PROJECT_NAME}: Using structured context and latest instruction.", flush=True)
-        import subprocess
         try:
             tree_output = subprocess.check_output(
                 ["tree", "/workspace", "-I", "node_modules|.git|venv|.venv|.cline_context|.cline_logs|__pycache__|dist|build|public|.knowledge_base"], 
                 text=True, stderr=subprocess.DEVNULL
             )
-        except Exception:
+        except (subprocess.SubprocessError, OSError):
             tree_output = "(Could not generate directory tree)"
 
         symbol_skeleton = get_symbol_skeleton("/workspace")
@@ -676,7 +667,6 @@ def run_distillation():
                 content = msg.get("content", "")
                 latest_instruction = content
                 # Extract directives: remove !build and flags
-                import re
                 directives = re.sub(r'!build|--repo\s+\S+|--kb\s+\S+', '', content, flags=re.IGNORECASE).strip()
                 if directives:
                     user_directives = f"\n  <USER_DIRECTIVES>\n{directives}\n  </USER_DIRECTIVES>\n"
@@ -819,7 +809,7 @@ def run_distillation():
                             timeout=120.0
                         )
                         break # Success
-                    except Exception as e:
+                    except (httpx.HTTPError, OSError) as e:
                         if attempt < max_retries - 1:
                             print(f"  ⚠ Pre-load retryable error: {e}. Retrying in 5s...")
                             time.sleep(5)
@@ -853,7 +843,7 @@ def run_distillation():
                 with open(intermediate_path, "w", encoding="utf-8") as f:
                     f.write(f"# Distillation Intermediate: {pass_key.title()}\n\n{result}")
                 print(f"  ↳ Saved intermediate result to {intermediate_path}")
-            except Exception as e:
+            except OSError as e:
                 print(f"  ⚠ Failed to save intermediate result: {e}")
 
         # We keep model warm for Phase 2 (the Cline Build cycle).
@@ -880,7 +870,6 @@ def assemble_clinerules(results: dict, config: dict, messages: list) -> str:
     target_obj = "Complete the implementation roadmap as specified."
     for msg in reversed(messages):
         if "!build" in msg.get("content", "").lower():
-            import re
             content = msg.get("content", "")
             # Filter out !build and flags
             target_obj = re.sub(r'!build|--repo\s+\S+|--kb\s+\S+', '', content, flags=re.IGNORECASE).strip()
