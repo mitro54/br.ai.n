@@ -29,6 +29,8 @@ cleanup_vram() {
     echo "========================================"
     echo "🧹 VRAM VACUUM: Releasing GPU Expert..."
     echo "========================================"
+    # Normalize permissions on /workspace so host user owns full read/write access
+    chmod -R ugo+rwX /workspace 2>/dev/null || true
     # Send shutdown signal to orchestrator
     ORCHESTRATOR_URL="${ORCHESTRATOR_URL:-http://host.docker.internal:8000}"
     curl -s -X POST "${ORCHESTRATOR_URL}/v1/shutdown_expert" > /dev/null || true
