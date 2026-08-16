@@ -1911,6 +1911,9 @@ async def _trigger_build_pipeline(messages: list) -> str:
         # We mount the SPECIFIC conversation folder as /workspace
         container_name = f"cline-builder-{int(time.time())}"
         project_name = os.path.basename(abs_target_dir)
+        host_uid = os.getuid() if hasattr(os, "getuid") else 1000
+        host_gid = os.getgid() if hasattr(os, "getgid") else 1000
+
         cmd = [
             "docker", "compose", "--profile", "build", "run", "-d", "--rm",
             "--name", container_name,
@@ -1919,6 +1922,8 @@ async def _trigger_build_pipeline(messages: list) -> str:
             "-e", f"PROJECT_NAME={project_name}",
             "-e", f"EXPERT_CTX={DISTILL_CTX}",
             "-e", f"CLINE_CTX={CLINE_CTX}",
+            "-e", f"HOST_UID={host_uid}",
+            "-e", f"HOST_GID={host_gid}",
             "-e", "ORCHESTRATOR_URL=http://host.docker.internal:8000",
             "cline-builder"
         ]

@@ -29,7 +29,10 @@ cleanup_vram() {
     echo "========================================"
     echo "🧹 VRAM VACUUM: Releasing GPU Expert..."
     echo "========================================"
-    # Normalize permissions on /workspace so host user owns full read/write access
+    # Re-assign ownership to host user so git and filesystem have zero dubious ownership errors
+    if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ]; then
+        chown -R "${HOST_UID}:${HOST_GID}" /workspace 2>/dev/null || true
+    fi
     chmod -R ugo+rwX /workspace 2>/dev/null || true
     # Send shutdown signal to orchestrator
     ORCHESTRATOR_URL="${ORCHESTRATOR_URL:-http://host.docker.internal:8000}"
@@ -301,7 +304,7 @@ path = sys.argv[1]
 try:
     with open(path, 'rb') as f:
         content = f.read().decode('utf-8', 'ignore')
-    clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\([A-Za-z0-9]|\x1b[=>]|\r', '', content)
+    clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\([A-Za-z0-9]|\x1b[=>]|\r|\[[0-9;]{1,5}m', '', content)
     with open(path, 'w', encoding='utf-8') as f:
         f.write(clean)
 except Exception:
@@ -359,6 +362,9 @@ generate_session_state() {
             echo "" >> "$STATE_FILE"
         fi
     done
+
+    # Clean ANSI codes from session state file
+    clean_log_file "$STATE_FILE"
 }
 
 # =============================================================================
