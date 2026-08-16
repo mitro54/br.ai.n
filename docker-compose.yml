@@ -10,7 +10,7 @@ services:
       - SEARXNG_BASE_URL=http://localhost:8080/
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:latest
     container_name: open-webui
     networks:
       - ai-workspace-net
@@ -53,7 +53,7 @@ services:
     environment:
       - OLLAMA_HOST=http://host.docker.internal:11434
       - AGENT_CONFIG_PATH=/app/agent_config.json
-      - EXPERT_CTX=8192
+      - EXPERT_CTX=65536
     working_dir: /workspace
 
 networks:

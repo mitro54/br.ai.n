@@ -890,6 +890,7 @@ def assemble_clinerules(results: dict, config: dict, messages: list) -> str:
         f"- Max project size: {limits.get('max_project_size_mb', 4096)} MB",
         f"- Max build iterations: {limits.get('max_build_iterations', 5)}",
         "- PRESERVATION POLICY: Prioritize building on top of existing code. Maintain the current file structure and design patterns. Unsolicited rework, file-splitting, or structural optimization is strictly forbidden.",
+        "- WEB RESEARCH TOOLS: To get latest documentation or libraries, use 'web-search \"<query>\"' in terminal. To inspect documentation pages, use 'fetch-page \"<url>\"'.",
         "- ANTI-LOOP RULE: Never attempt the same bug fix more than twice.",
         "- FOCUS REMINDER: Keep the main goal in mind. Do not get distracted by hypothetical features.",
         "- TASK COMPLETION: Relentlessly work through your checklist. Mark impossible tasks as blocked and move on.",

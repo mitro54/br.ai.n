@@ -105,7 +105,7 @@ services:
       - SEARXNG_BASE_URL=http://localhost:8080/
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:latest
     container_name: open-webui
     networks:
       - ai-workspace-net

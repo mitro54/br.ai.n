@@ -23,9 +23,9 @@ logger = logging.getLogger("Bob-Orchestrator")
 # Each model role is a dict: model name, provider type, and API base URL.
 # Supported providers: "ollama", "lmstudio", "llamacpp"
 EXPERT_CONFIG = {
-   "model": "unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ4_NL",
-    "provider": "llamacpp",
-    "base_url": "http://localhost:8081",
+    "model": "qwen3.8opt:latest",
+    "provider": "ollama",
+    "base_url": "http://localhost:11434",
 }
 ROUTER_CONFIG = {
     "model": "qwen2.5:1.5b",
@@ -36,16 +36,16 @@ ROUTER_CONFIG = {
 # Shorthand names (derived from config, used in routing logic throughout)
 EXPERT_MODEL = EXPERT_CONFIG["model"]
 ROUTER_MODEL = ROUTER_CONFIG["model"]
-DEFAULT_EXPERT_MODEL = "qwen3.5:27b" # Keep this as default, if you know what youre doing, you can change it with the PARAMS_GENERAL/PARAMS_CODING
+DEFAULT_EXPERT_MODEL = "qwen3.8opt:latest" # Keep this as default, if you know what youre doing, you can change it with the PARAMS_GENERAL/PARAMS_CODING
 
 # llama.cpp managed process settings (only used when provider is "llamacpp")
 LLAMACPP_BINARY = "/home/mv/llama.cpp/build/bin/llama-server"  # Path to llama-server binary
 LLAMACPP_DEFAULT_ARGS = ["--cache-type-k", "q8_0", "--cache-type-v", "q8_0"]  # Extra CLI args (KV Quant enabled)
 
 COMFYUI_URL = "http://localhost:8188"
-EXPERT_CTX = 131072   # Context for the expert model (128k)
-DISTILL_CTX = 131072  # Context for the distillation engine (128k)
-CLINE_CTX = 131072    # Context for the Cline agent (128k)
+EXPERT_CTX = 65536    # Context for the expert model (65k)
+DISTILL_CTX = 65536   # Context for the distillation engine (65k)
+CLINE_CTX = 65536     # Context for the Cline agent (65k)
 
 # --- STATE MANAGEMENT ---
 gpu_lock = asyncio.Lock()
@@ -1177,7 +1177,7 @@ async def proxy_ollama(request: Request):
 
         if is_router_forwarded:
             target_model = EXPERT_MODEL
-            keep_alive = "10m" if not vram_locked else "-1"
+            keep_alive = "10m" if not vram_locked else -1
             # Only treat as cold if the expert isn't already warm and running
             is_cold_expert = not is_expert_warm
             if not vram_locked:
@@ -1188,7 +1188,7 @@ async def proxy_ollama(request: Request):
         elif _get_bound_project_dir(messages) or "@" in prompt_lower:
             project_dir = _get_bound_project_dir(messages)
             target_model = EXPERT_MODEL
-            keep_alive = "10m" if not vram_locked else "-1"
+            keep_alive = "10m" if not vram_locked else -1
             is_cold_expert = not is_expert_warm
             if not vram_locked:
                 expert_warm_until = current_time + 600
@@ -1215,7 +1215,7 @@ async def proxy_ollama(request: Request):
             logger.info(f"Direct request for Expert model ({expert_mode}).")
         elif is_expert_warm or vram_locked:
             target_model = EXPERT_MODEL
-            keep_alive = "10m" if not vram_locked else "-1"
+            keep_alive = "10m" if not vram_locked else -1
             if not vram_locked:
                 expert_warm_until = current_time + 600
         else:
@@ -1875,7 +1875,12 @@ async def _trigger_build_pipeline(messages: list) -> str:
                 logger.info(f"No snippets found, but project is bound to {bound_dir}. Proceeding with build.")
                 target_dir = bound_dir
             else:
-                return f"⚠️ **Build aborted.** {status_msg}"
+                # No code snippets and no bound project — create a conversation-only folder
+                # The user may be discussing requirements without code yet
+                conv_id = mover.get_conversation_id(messages)
+                target_dir = os.path.join("conversations", f"project_{conv_id}")
+                os.makedirs(target_dir, exist_ok=True)
+                logger.info(f"No snippets or bound project. Created conversation-only folder: {target_dir}")
         else:
             # Extract target_dir from the mover's response
             match = re.search(r"to `([^`]+)`", status_msg)

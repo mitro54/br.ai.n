@@ -19,6 +19,7 @@ set -euo pipefail
 
 # Set the global config directory so ALL cline commands use it
 export CLINE_DIR="/root/.config/Cline"
+export NODE_NO_WARNINGS=1
 
 # --- VRAM Safety Guard ---
 # Ensure that we release the GPU expert model when the container shuts down
@@ -39,7 +40,9 @@ CONFIG_PATH="${AGENT_CONFIG_PATH:-/app/agent_config.json}"
 CONVERSATION_FILE="${CONVERSATION_FILE:-/workspace/.cline_context/conversation.json}"
 CLINERULES_PATH="${CLINERULES_PATH:-/workspace/.clinerules}"
 OLLAMA_HOST="${OLLAMA_HOST:-http://host.docker.internal:11434}"
-CLINE_CTX="${CLINE_CTX:-131072}"
+CLINE_CTX="${CLINE_CTX:-65536}"
+EXPERT_CTX="${EXPERT_CTX:-65536}"
+CLINE_BIN="$(which cline 2>/dev/null || echo /usr/local/bin/cline)"
 
 echo "========================================"
 echo "🔨 Cline Builder Pipeline"
@@ -340,7 +343,7 @@ else
 fi
 echo "  🔑 Configuring provider (${CLINE_PROVIDER}) for Cline CLI..."
 
-cline auth \
+"$CLINE_BIN" auth \
     -p openai-compatible \
     -k "dummy" \
     -m "$CLINE_MODEL" \
@@ -365,19 +368,19 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
     generate_session_state "$ITERATION" "build"
 
     CURRENT_TIMEOUT=1800 # 30 minutes
-    BUILD_MSG="IMPORTANT: First read '.cline_context/.session_state.md' to understand what has been done so far. Then read '.clinerules' and execute remaining implementation tasks."
+    BUILD_MSG="IMPORTANT: You are running in a headless autonomous CI runner. NEVER call ask_question or ask_followup_question. First read '.cline_context/.session_state.md' to understand what has been done so far. Then read '.clinerules' and execute remaining implementation tasks. Make all technical decisions independently."
 
     if [ $ITERATION -eq $MAX_ITERATIONS ]; then
         echo "  🚨 FINAL ROUND: Shifting to Stabilization and Debugging..."
-        BUILD_MSG="IMPORTANT: First read '.cline_context/.session_state.md'. CRITICAL: This is the FINAL iteration (${ITERATION} of ${MAX_ITERATIONS}). Your directive is now STABILIZATION. Revisit any TODOs, uncommented code, or failing tests. Fix the root causes of any remaining bugs."
+        BUILD_MSG="IMPORTANT: Headless runner (DO NOT ask questions). First read '.cline_context/.session_state.md'. CRITICAL: This is the FINAL iteration (${ITERATION} of ${MAX_ITERATIONS}). Your directive is now STABILIZATION. Revisit any TODOs, uncommented code, or failing tests. Fix the root causes of any remaining bugs."
         CURRENT_TIMEOUT=1800
     elif [ $ITERATION -gt 1 ]; then
-        BUILD_MSG="IMPORTANT: First read '.cline_context/.session_state.md' to recover your memory. Continue building the project. Review what was done in the previous iteration, fix any issues, and complete remaining tasks from .clinerules. This is iteration ${ITERATION} of ${MAX_ITERATIONS}. Remember: keep momentum and don't get stuck on one bug."
+        BUILD_MSG="IMPORTANT: Headless runner (DO NOT ask questions). First read '.cline_context/.session_state.md' to recover your memory. Continue building the project. Review what was done in the previous iteration, fix any issues, and complete remaining tasks from .clinerules. This is iteration ${ITERATION} of ${MAX_ITERATIONS}. Remember: keep momentum and don't get stuck on one bug."
     fi
 
     set +e
-    export CLINE_MODEL CURRENT_TIMEOUT BUILD_MSG
-    script -q -e -c 'cline -v --auto-approve true \
+    export CLINE_BIN CLINE_MODEL CURRENT_TIMEOUT BUILD_MSG
+    script -q -e -c '"$CLINE_BIN" -v --auto-approve true \
         -P openai-compatible \
         -m "$CLINE_MODEL" \
         --timeout "$CURRENT_TIMEOUT" \
@@ -398,7 +401,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
     echo "  🔍 Running Cline (Verification mode)..."
     generate_session_state "$ITERATION" "verify"
 
-    VERIFY_MSG="IMPORTANT: First read '.cline_context/.session_state.md' to understand what has been done so far. 
+    VERIFY_MSG="IMPORTANT: Headless runner (DO NOT ask questions). First read '.cline_context/.session_state.md' to understand what has been done so far. 
     [STABILITY PROTOCOL]: Do not start by reading the entire codebase. Run the project's primary test suite immediately (check the TOOLCHAIN block in .clinerules for the correct command). Use the failures to identify which files actually need inspection.
     1) Verify all tasks from .clinerules are implemented and the code runs as expected. 
     2) [QUALITY RECONCILIATION]: Read '.cline_context/quality_audit.md'. If current implementation has resolved any of these critiques, REMOVE them from the file.
@@ -408,8 +411,8 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
     6) CONTINUITY: Watch for '[STABILITY MONITOR]' markers in history. If a turn was cut off, do not re-read from the beginning; pick up exactly where you left off.
     7) Before testing, if a port is in use, YOU MUST ONLY use 'npx kill-port <portnumber>' to free it."
     set +e
-    export CLINE_MODEL VERIFY_MSG
-    script -q -e -c 'cline -v --auto-approve true \
+    export CLINE_BIN CLINE_MODEL VERIFY_MSG
+    script -q -e -c '"$CLINE_BIN" -v --auto-approve true \
         -P openai-compatible \
         -m "$CLINE_MODEL" \
         --timeout 1800 \
@@ -421,16 +424,17 @@ while [ $ITERATION -lt $MAX_ITERATIONS ] && [ "$BUILD_COMPLETE" = false ]; do
     echo "  🛡️ Running Cline (Safety audit)..."
     generate_session_state "$ITERATION" "safety"
 
-    SAFETY_MSG="IMPORTANT: First read '.cline_context/.session_state.md' to understand what has been done so far.
+    SAFETY_MSG="IMPORTANT: Headless runner (DO NOT ask questions). First read '.cline_context/.session_state.md' to understand what has been done so far.
     [STABILITY PROTOCOL]: Do not perform an exhaustive top-to-bottom audit of every file. Use 'searchFiles' (grep) to hunt for hazardous patterns like 'unsafe', 'shell', or hardcoded paths. Only deep-dive into the specific files and lines that flag these risks.
     1) Audit for: Input validation, Path traversal, Hardcoded secrets, Injection risks, Infinite loops, Missing error handling. 
     2) If you find critical issues, attempt to FIX THEM DIRECTLY in the code. 
     3) If you fix them or the code is already safe, append 'SAFE' to the '.build_complete' file. 
     4) CONTINUITY: Watch for '[STABILITY MONITOR]' markers in history. If a turn was cut off, do not re-read from the beginning; pick up exactly where you left off.
-    5) Before testing, if a port is in use, YOU MUST ONLY use 'npx kill-port <portnumber>' to free it."
+    5) Before testing, if a port is in use, YOU MUST ONLY use 'npx kill-port <portnumber>' to free it.
+    NON-INTERACTIVE MODE: Do not ask for user input. If safety issues are found, perform remediation autonomously."
     set +e
-    export CLINE_MODEL SAFETY_MSG
-    script -q -e -c 'cline -v --auto-approve true \
+    export CLINE_BIN CLINE_MODEL SAFETY_MSG
+    script -q -e -c '"$CLINE_BIN" -v --auto-approve true \
         -P openai-compatible \
         -m "$CLINE_MODEL" \
         --timeout 1800 \
