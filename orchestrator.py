@@ -1,5 +1,4 @@
 import asyncio
-import httpx
 import json
 import logging
 import os
@@ -8,12 +7,12 @@ import subprocess
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
+
+import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse, JSONResponse
-from typing import Optional
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import mover
-
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -162,25 +161,25 @@ def _prune_messages(messages: list, max_chars: int = 90000) -> list:
         return messages
 
     logger.info(f"[Safety Monitor] Pruning context: {total_chars} chars > {max_chars} limit.")
-    
+
     # Keep system message and last 4 turns
     system_msg = messages[0] if messages[0].get("role") == "system" else None
     footer = messages[-4:]
-    
+
     # Prune from the middle (starting after system message)
     middle = messages[1:-4] if system_msg else messages[:-4]
-    
+
     # Simple strategy: Keep removing oldest middle messages until under limit
     while total_chars > max_chars and middle:
         removed = middle.pop(0)
         total_chars -= len(str(removed.get("content", "")))
-    
+
     new_messages = []
     if system_msg:
         new_messages.append(system_msg)
     new_messages.extend(middle)
     new_messages.extend(footer)
-    
+
     logger.info(f"[Safety Monitor] New context size: {sum(len(str(m.get('content', ''))) for m in new_messages)} chars.")
     return new_messages
 
@@ -206,14 +205,14 @@ async def _provider_load(config: dict):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, stderr = await proc.communicate()
+            _stdout, stderr = await proc.communicate()
             if proc.returncode == 0:
                 logger.info(f"LM Studio: Loaded {model}")
             else:
                 logger.warning(f"LM Studio: Load may have failed: {stderr.decode().strip()}")
         except FileNotFoundError:
             logger.error("LM Studio: 'lms' CLI not found. Install with: ~/.lmstudio/bin/lms bootstrap")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"LM Studio: Load error: {e}")
 
     elif provider == "llamacpp":
@@ -270,7 +269,7 @@ async def _start_llamacpp_server(config: dict):
         # Set to 0.7 to give massive breathing room and reduce rotation frequency.
         # Disable similarity matching to force linear slot persistence.
         truncate_args = [
-            "--chat-truncate", 
+            "--chat-truncate",
             "--chat-truncate-max-keep", "0.7",
             "--slot-prompt-similarity", "0.95",
             "--batch-size", "1024",
@@ -286,15 +285,15 @@ async def _start_llamacpp_server(config: dict):
         if model not in _managed_processes:
             logger.info(f"llama.cpp: Starting: {' '.join(cmd)}")
             ready_event.clear()
-            
+
             # Force Flash Attention ON to save VRAM and improve speed at 128k context
             env = os.environ.copy()
             env["LLAMA_ARG_FLASH_ATTN"] = "on"
-            
-            log_file = open("llama-server.log", "a")
-            proc = subprocess.Popen(cmd, env=env, stdout=log_file, stderr=subprocess.STDOUT)
+
+            log_file = open("llama-server.log", "a")  # noqa: ASYNC230, SIM115
+            proc = subprocess.Popen(cmd, env=env, stdout=log_file, stderr=subprocess.STDOUT)  # noqa: ASYNC220
             _managed_processes[model] = proc
-            
+
             # Start background health-check task
             asyncio.create_task(_poll_llamacpp_health(model, base_url, ready_event))
 
@@ -305,7 +304,7 @@ async def _start_llamacpp_server(config: dict):
         logger.info(f"llama.cpp: {model} is confirmed ready.")
     except asyncio.TimeoutError:
         logger.error(f"llama.cpp: Timeout waiting for {model} readiness.")
-        raise Exception(f"Model startup timed out: {model}")
+        raise TimeoutError(f"Model startup timed out: {model}") from None
 
 
 async def _poll_llamacpp_health(model: str, base_url: str, ready_event: asyncio.Event):
@@ -325,10 +324,10 @@ async def _poll_llamacpp_health(model: str, base_url: str, ready_event: asyncio.
                 logger.info(f"llama.cpp: Background health-check passed for {model}")
                 ready_event.set()
                 return
-        except Exception:
+        except (httpx.HTTPError, OSError):
             pass
         await asyncio.sleep(2.0)
-    
+
     logger.error(f"llama.cpp: Background health-check TIMED OUT for {model}")
 
 
@@ -390,7 +389,7 @@ async def get_loaded_models() -> list[str]:
                 if resp.status_code == 200:
                     models = resp.json().get("models", [])
                     loaded.extend([m.get("name", "") for m in models])
-            except Exception:
+            except (httpx.HTTPError, OSError, ValueError):
                 pass
 
         elif provider == "lmstudio":
@@ -402,7 +401,7 @@ async def get_loaded_models() -> list[str]:
                 stdout, _ = await proc.communicate()
                 if cfg["model"] in stdout.decode():
                     loaded.append(cfg["model"])
-            except Exception:
+            except (asyncio.SubprocessError, OSError):
                 pass
 
     # Check managed llama.cpp processes
@@ -441,7 +440,7 @@ async def force_unload(model_name: str):
         elif provider == "llamacpp":
             logger.info(f"Unloading model (llama.cpp): {model_name}")
             await _stop_llamacpp_server(config)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"Failed to unload {model_name}: {e}")
 
 async def verified_unload(model_name: str, max_wait: float = 3.0):
@@ -462,7 +461,7 @@ async def verified_unload(model_name: str, max_wait: float = 3.0):
                 names = [m.get("name", "") for m in models]
                 if not any(model_name in m for m in names):
                     return True
-        except Exception:
+        except (httpx.HTTPError, OSError, ValueError):
             pass
 
         await force_unload(model_name)
@@ -478,7 +477,7 @@ async def verified_unload(model_name: str, max_wait: float = 3.0):
                     names = [m.get("name", "") for m in models]
                     if not any(model_name in m for m in names):
                         return True
-            except Exception:
+            except (httpx.HTTPError, OSError, ValueError):
                 pass
 
         logger.warning(f"{model_name} persistent in VRAM after {max_wait}s; continuing.")
@@ -508,7 +507,7 @@ async def free_comfyui():
             json={"unload_models": True, "free_memory": True},
             timeout=3.0
         )
-    except Exception:
+    except (httpx.HTTPError, OSError):
         pass
 
 
@@ -535,7 +534,7 @@ async def periodic_cleanup():
                             await _stop_llamacpp_server(expert_config)
         except asyncio.CancelledError:
             break
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Cleanup Task Error: {e}")
             await asyncio.sleep(60)  # Wait before retry on error
 
@@ -547,7 +546,7 @@ async def is_comfy_active() -> bool:
         if resp.status_code == 200:
             data = resp.json()
             return len(data.get("queue_running", [])) > 0 or len(data.get("queue_pending", [])) > 0
-    except Exception:
+    except (httpx.HTTPError, OSError, ValueError):
         pass
     return False
 
@@ -557,7 +556,7 @@ async def get_comfy_history_count() -> int:
         resp = await http_client.get(f"{COMFYUI_URL}/history", timeout=2.0)
         if resp.status_code == 200:
             return len(resp.json())
-    except Exception:
+    except (httpx.HTTPError, OSError, ValueError):
         pass
     return 0
 
@@ -629,7 +628,7 @@ async def analyze_request(messages: list) -> dict:
                 "requires_tool": bool(data.get("requires_tool", False)),
                 "is_coding": bool(data.get("is_coding", False))
             }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"Router network/parsing error: {e}")
 
     return {"complexity": 1, "followups": False, "requires_tool": False, "is_coding": False}
@@ -640,7 +639,7 @@ async def analyze_request(messages: list) -> dict:
 
 async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                        is_native: bool = False, backend_is_ollama: bool = True,
-                       request_headers: dict = {}):
+                       request_headers: dict | None = None):
     """
     Proxies a streaming response from the backend AI model while managing VRAM locks.
     Handles format translation between Ollama and OpenAI-compatible backends/clients.
@@ -650,6 +649,8 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
         backend_is_ollama: True if the BACKEND sends Ollama-native format.
         request_headers: Headers from the initial request (for X-No-Scrub).
     """
+    if request_headers is None:
+        request_headers = {}
     lock_released = False
     turn_throughput = 0  # Character counter to detect infinite reasoning loops
 
@@ -675,22 +676,22 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                 error_msg = error_body[:200].strip() or "Backend unavailable"
                 logger.error(f"Backend error ({resp.status_code}): {error_body[:500]}")
                 if is_native:
-                    yield f'{json.dumps({"model": "Bob", "message": {"role": "assistant", "content": f"⚠️ {error_msg}"}, "done": True})}\n'.encode('utf-8')
+                    yield f'{json.dumps({"model": "Bob", "message": {"role": "assistant", "content": f"⚠️ {error_msg}"}, "done": True})}\n'.encode()
                 else:
                     err_chunk = {"id": "chatcmpl-Bob", "object": "chat.completion.chunk", "model": "Bob",
                                   "choices": [{"index": 0, "delta": {"content": f"⚠️ {error_msg}"}, "finish_reason": "stop"}]}
-                    yield f"data: {json.dumps(err_chunk)}\n\n".encode('utf-8')
+                    yield f"data: {json.dumps(err_chunk)}\n\n".encode()
                     yield b"data: [DONE]\n\n"
                 return
 
             line_iter = resp.aiter_lines().__aiter__()
-            
+
             # Check if scrubbing is disabled via header
             scrub_disabled = request_headers.get("X-No-Scrub", "false").lower() == "true"
-            
+
             # Non-destructive heartbeat logic
             next_line_task = asyncio.create_task(line_iter.__anext__())
-            
+
             # Syntax Scrubber state
             content_buffer = ""
             lookahead_buffer = "" # For split-chunk tag reconstruction
@@ -698,7 +699,7 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
             in_progress_block = False
             active_tag_name = ""
             seen_openers = set() # Track starting tags to prevent dangling closures
-            
+
             while True:
                 try:
                     # Wait for next line or heartbeat timeout (60s)
@@ -707,12 +708,12 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                         timeout=60.0,
                         return_when=asyncio.FIRST_COMPLETED
                     )
-                    
+
                     if next_line_task not in done:
                         # Timeout! Send keeping-alive pulse
                         yield b": heartbeat\n\n"
                         continue
-                    
+
                     # Task is done, get the line
                     try:
                         line = next_line_task.result()
@@ -720,10 +721,10 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                         next_line_task = asyncio.create_task(line_iter.__anext__())
                     except StopAsyncIteration:
                         break
-                    
+
                     if not line:
                         continue
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.error(f"Iterator error: {e}")
                     break
 
@@ -732,22 +733,22 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                     try:
                         data = json.loads(line)
                         data["model"] = "Bob"
-                        yield f"{json.dumps(data)}\n".encode('utf-8')
-                    except Exception:
-                        yield f"{line}\n".encode('utf-8')
+                        yield f"{json.dumps(data)}\n".encode()
+                    except (json.JSONDecodeError, TypeError, KeyError):
+                        yield f"{line}\n".encode()
                 else:
                     # Backend sends OpenAI SSE format (data: {json})
                     if not line.startswith("data: "):
                         continue
                     if line == "data: [DONE]":
                         if is_native:
-                            yield f'{json.dumps({"model": "Bob", "message": {"role": "assistant", "content": ""}, "done": True})}\n'.encode('utf-8')
+                            yield f'{json.dumps({"model": "Bob", "message": {"role": "assistant", "content": ""}, "done": True})}\n'.encode()
                         else:
                             yield b"data: [DONE]\n\n"
                         continue
                     try:
                         data = json.loads(line[6:])
-                        
+
                         # VALIDATION: Discard chunks that don't have choices
                         if not is_native and "choices" not in data and not line.endswith("[DONE]"):
                             continue
@@ -762,7 +763,7 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                         if choices:
                             delta = choices[0].get("delta", {})
                             content = delta.get("content", "")
-                            
+
                             # Safety Monitor: 100k capacity for complex systems engineering.
                             # We track this REGARDLESS of scrubbing status to protect Distillation passes.
                             if content and not in_tool_tag:
@@ -774,9 +775,9 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                                     if in_tool_tag and active_tag_name:
                                         logger.warning(f"[Safety Monitor] Force-closing tag </{active_tag_name}> due to capacity limit.")
                                         closure = f"</{active_tag_name}>\n\n[STABILITY MONITOR: Analytical capacity reached. Turn was terminated while '{active_tag_name}' was active. DO NOT re-read this file/data from the beginning. Use 'grep' or continue from line 1000+ if needed.]\n\n"
-                                    
+
                                     delta["content"] = content + closure + "[STABILITY PROTOCOL: Analytical reasoning capacity exceeded (100k). Forcing turn completion.]"
-                                    
+
                                     # Fragment Recovery: If server ends turn prematurely while tag is open
                                     finish_reason = choices[0].get("finish_reason")
                                     if (finish_reason == "length" or (is_native and data.get("done"))) and in_tool_tag and active_tag_name:
@@ -790,16 +791,16 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
 
                                     if is_native:
                                         native_chunk = {"model": "Bob", "message": delta, "done": data.get("done", False)}
-                                        yield f"{json.dumps(native_chunk)}\n".encode("utf-8")
+                                        yield f"{json.dumps(native_chunk)}\n".encode()
                                     else:
-                                        yield f"data: {json.dumps(data)}\n\n".encode("utf-8")
+                                        yield f"data: {json.dumps(data)}\n\n".encode()
                                     return
 
                             if content and not scrub_disabled:
                                 # Look-Ahead Reconstruction: Handle tags split across chunks
                                 raw_content = lookahead_buffer + content
                                 lookahead_buffer = ""
-                                
+
                                 # If chunk ends with a partial tag, hold it for the next packet
                                 if "<" in raw_content and ">" not in raw_content[raw_content.rfind("<"):]:
                                     split_idx = raw_content.rfind("<")
@@ -821,15 +822,14 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                                         # Track openers in this Turn/Request
                                         for opener in re.findall(r'<\s*([a-zA-Z0-9_]+)\s*>', value):
                                             seen_openers.add(opener.lower())
-                                        
+
                                         # Identify and strip dangling closures
                                         closures = re.findall(r'</\s*([a-zA-Z0-9_]+)\s*>', value, re.IGNORECASE)
                                         for closure in closures:
-                                            if closure.lower() not in seen_openers:
-                                                if closure.lower() in scrub_targets:
-                                                    logger.warning(f"[Scrubber] Stripped dangling tag from delta['{key}']: </{closure}>")
-                                                    value = re.sub(f'</\\s*{re.escape(closure)}\\s*>', "", value, flags=re.IGNORECASE)
-                                        
+                                            if closure.lower() not in seen_openers and closure.lower() in scrub_targets:
+                                                logger.warning(f"[Scrubber] Stripped dangling tag from delta['{key}']: </{closure}>")
+                                                value = re.sub(f'</\\s*{re.escape(closure)}\\s*>', "", value, flags=re.IGNORECASE)
+
                                         delta[key] = value
 
                                 # Standard content extraction for tool-state tracking
@@ -839,11 +839,11 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                                     if "<task_progress>" in content:
                                         in_progress_block = True
                                         content_buffer += content
-                                        delta["content"] = " " 
+                                        delta["content"] = " "
                                     elif "</task_progress>" in content:
                                         in_progress_block = False
                                         content_buffer += content
-                                        delta["content"] = " " 
+                                        delta["content"] = " "
                                     elif active_tag_name and f"</{active_tag_name}>" in content:
                                         if content_buffer:
                                             clean_progress = content_buffer.replace("<task_progress>", "### Progress:\n").replace("</task_progress>", "")
@@ -855,14 +855,14 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                                         active_tag_name = ""
                                     elif in_progress_block:
                                         content_buffer += content
-                                        delta["content"] = " " 
+                                        delta["content"] = " "
                                     else:
                                         delta["content"] = content
                                 else:
                                     tag_match = re.search(r'<([a-z0-9_]+)>', content)
                                     if tag_match:
                                         tag_name = tag_match.group(1)
-                                        if tag_name in ["read_file", "write_to_file", "search_files", "execute_command", 
+                                        if tag_name in ["read_file", "write_to_file", "search_files", "execute_command",
                                                       "list_files", "list_dir", "grep_search", "read_browser_page",
                                                       "replace_in_file", "insert_content", "ask_followup_question", "attempt_completion"]:
                                             in_tool_tag = True
@@ -880,19 +880,19 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
                             ollama_chunk = {
                                 "model": "Bob", "message": {"role": "assistant", "content": token}, "done": done
                             }
-                            yield f"{json.dumps(ollama_chunk)}\n".encode('utf-8')
+                            yield f"{json.dumps(ollama_chunk)}\n".encode()
                         else:
                             # Path 3: OpenAI backend -> OpenAI client (direct proxy)
-                            yield f"data: {json.dumps(data)}\n\n".encode('utf-8')
-                    except Exception:
+                            yield f"data: {json.dumps(data)}\n\n".encode()
+                    except (json.JSONDecodeError, TypeError, KeyError):
                         rewritten = re.sub(r'("model"\s*:\s*")[^"]+(")', r'\1Bob\2', line)
-                        yield f"{rewritten}\n\n".encode('utf-8')
+                        yield f"{rewritten}\n\n".encode()
 
             # FINAL FLUSH: Handle dangling tags AND held lookahead fragments
             final_fix = ""
             if lookahead_buffer:
                 final_fix += lookahead_buffer
-            
+
             if in_tool_tag and active_tag_name:
                 if content_buffer:
                     final_fix += "\n\n" + content_buffer.replace("<task_progress>", "### Progress:\n").replace("</task_progress>", "")
@@ -901,23 +901,23 @@ async def stream_proxy(url: str, body: dict, lock: asyncio.Lock,
 
             if final_fix:
                 if is_native:
-                    yield f'{json.dumps({"model": "Bob", "message": {"role": "assistant", "content": final_fix}, "done": True})}\n'.encode('utf-8')
+                    yield f'{json.dumps({"model": "Bob", "message": {"role": "assistant", "content": final_fix}, "done": True})}\n'.encode()
                 else:
                     final_chunk = {"id": "chatcmpl-Bob", "object": "chat.completion.chunk", "model": "Bob",
                                   "choices": [{"index": 0, "delta": {"content": final_fix}, "finish_reason": "stop"}]}
-                    yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
+                    yield f"data: {json.dumps(final_chunk)}\n\n".encode()
                     yield b"data: [DONE]\n\n"
 
     except (GeneratorExit, asyncio.CancelledError):
         pass
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Stream proxy error: {e}")
         if is_native:
-            yield f'{json.dumps({"model": "Bob", "message": {"role": "assistant", "content": f"⚠️ Error: {str(e)}"}, "done": True})}\n'.encode('utf-8')
+            yield f'{json.dumps({"model": "Bob", "message": {"role": "assistant", "content": f"⚠️ Error: {e!s}"}, "done": True})}\n'.encode()
         else:
             err_chunk = {"id": "chatcmpl-Bob", "object": "chat.completion.chunk", "model": "Bob",
-                          "choices": [{"index": 0, "delta": {"content": f"\n\n⚠️ **Error:** {str(e)}"}, "finish_reason": "error"}]}
-            yield f"data: {json.dumps(err_chunk)}\n\n".encode('utf-8')
+                          "choices": [{"index": 0, "delta": {"content": f"\n\n⚠️ **Error:** {e!s}"}, "finish_reason": "error"}]}
+            yield f"data: {json.dumps(err_chunk)}\n\n".encode()
             yield b"data: [DONE]\n\n"
     finally:
         _release()
@@ -961,7 +961,7 @@ async def shutdown_expert():
     global expert_warm_until, vram_locked
     expert_warm_until = 0
     vram_locked = False
-    
+
     killed_count = 0
     for model_name, proc in list(_managed_processes.items()):
         if proc.poll() is None:
@@ -969,21 +969,20 @@ async def shutdown_expert():
             proc.terminate()
             try:
                 proc.wait(timeout=5)
-            except Exception:
+            except (subprocess.SubprocessError, OSError):
                 proc.kill()
             killed_count += 1
-        
+
         # Cleanup state
-        if model_name in _managed_processes:
-            del _managed_processes[model_name]
+        _managed_processes.pop(model_name, None)
         if model_name in _llamacpp_ready_events:
             _llamacpp_ready_events[model_name].clear()
-            
+
     try:
         # Use killall as a universal sweep for any binary name match
-        subprocess.run(["killall", "-9", "llama-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["killall", "-9", "llama-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)  # noqa: ASYNC221
         logger.info("VRAM Cleanup: Executed killall -9 llama-server sweep.")
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         pass
 
     logger.info(f"VRAM Cleanup: Terminated {killed_count} tracked expert processes.")
@@ -1023,7 +1022,7 @@ async def proxy_ollama(request: Request):
 
         # Background tasks (Follow-ups, titles, etc.)
         is_suggestion_ping = any(kw in last_content for kw in ["suggest 3-5", "generate a title", "generate a short title", "summarize", "short label", "tags"])
-        
+
         # Suppress suggestions immediately after a build launch to conserve VRAM for the 35B Expert
         if is_suggestion_ping and any("build pipeline" in str(m.get("content", "")).lower() for m in messages[-3:]):
             logger.info("Suppressing suggestion ping due to recent build pipeline trigger.")
@@ -1042,26 +1041,26 @@ async def proxy_ollama(request: Request):
         is_tool_result = (role == "tool")
         is_image_tool = is_tool_result and any(kw in last_content for kw in ["![", "comfy", "image_url", "image/"])
         is_search_tool = is_tool_result and not is_image_tool
-        
+
         # Search Intent (In user prompt)
         search_triggers = [
-            "google", "find on the web", "look up", "latest news", "recent news", "current weather", 
+            "google", "find on the web", "look up", "latest news", "recent news", "current weather",
             "what is the price of", "what is the status of", "current events", "today",
             "recently", "latest version of"
         ]
         is_search_query = (role == "user") and any(kw in last_content for kw in search_triggers)
-        
+
         # Image Intent (In user prompt)
         image_triggers = ["generate an image", "create an image", "create a picture", "draw a", "make an image", "flux", "comfyui"]
         is_image_query = (role == "user") and any(kw in last_content for kw in image_triggers)
 
         # History-based Search Detection (Check only last 2 messages)
         has_search_history = any(
-            (m.get("role") == "tool" or "retrieved" in str(m.get("content", "")).lower() or "sources" in str(m.get("content", "")).lower()) 
+            (m.get("role") == "tool" or "retrieved" in str(m.get("content", "")).lower() or "sources" in str(m.get("content", "")).lower())
             and not any(kw in str(m.get("content", "")).lower() for kw in ["![", "comfy", "image_url", "image/"])
             for m in messages[-2:]
         )
-        
+
         # 3. Interception Rules
         # Rule A: Silence image tool outputs
         if is_image_tool:
@@ -1080,10 +1079,11 @@ async def proxy_ollama(request: Request):
         is_background_task = (is_suggestion_ping or is_description_ping or is_expansion_ping) and not (is_search_tool or is_search_query or has_search_history or is_image_query)
 
         # Rule D: Signal Reset (Manual user turns clear the state)
-        if role == "user" and not (is_suggestion_ping or is_description_ping or is_expansion_ping or "### task:" in last_content):
-            if current_history_count != last_comfy_history_count:
-                last_comfy_history_count = current_history_count
-                asyncio.create_task(free_comfyui())
+        if (role == "user" and
+            not (is_suggestion_ping or is_description_ping or is_expansion_ping or "### task:" in last_content) and
+            current_history_count != last_comfy_history_count):
+            last_comfy_history_count = current_history_count
+            asyncio.create_task(free_comfyui())
 
         # Rule E: Suppress background tasks following maintenance commands
         maintenance_commands = ["!status", "!stop", "!move", "!build", "!lock", "!unlock"]
@@ -1092,7 +1092,7 @@ async def proxy_ollama(request: Request):
             prev_user_msg = messages[-3].get("content", "").lower() if messages[-3].get("role") == "user" else ""
             if any(cmd in prev_user_msg for cmd in maintenance_commands):
                 is_maintenance_followup = True
-        
+
         if is_maintenance_followup:
             logger.info("Maintenance follow-up detected: Silencing background task.")
             return _silent_response(is_native)
@@ -1246,14 +1246,14 @@ async def proxy_ollama(request: Request):
         # --- Context Binding & Tool Injection ---
         project_dir = _get_bound_project_dir(messages)
         project_context = ""
-        
+
         # Only inject if it's a bound project AND it's a direct user interaction (not an agent)
         if project_dir and target_model == EXPERT_MODEL and not is_agent_request:
             logger.info(f"Injecting project context from {project_dir}")
             tree = _get_project_tree(project_dir)
             skeleton = _get_symbol_skeleton(project_dir)
             mentions = _parse_file_mentions(messages[-1].get("content", ""), project_dir)
-            
+
             project_context = (
                 f"\n\n<PROJECT_CONTEXT>\n"
                 f"You are working on a bound project: `{os.path.basename(project_dir)}`\n"
@@ -1263,7 +1263,7 @@ async def proxy_ollama(request: Request):
             if mentions:
                 project_context += mentions
             project_context += "\n</PROJECT_CONTEXT>\n"
-            
+
             # Inject into the system message (or first available message)
             injected = False
             for m in messages:
@@ -1349,7 +1349,7 @@ async def proxy_ollama(request: Request):
                 logger.debug(f"Applied expert parameters for {EXPERT_MODEL}")
             else:
                 logger.info(f"Non-default expert {EXPERT_MODEL} detected; using default model settings.")
-            
+
             options["num_ctx"] = EXPERT_CTX
         else:
             options.update({"temperature": options.get("temperature", 0.7), "num_ctx": EXPERT_CTX})
@@ -1385,7 +1385,7 @@ async def proxy_ollama(request: Request):
                     error_text = ""
                     try:
                         error_text = resp.text[:300]
-                    except Exception:
+                    except (httpx.HTTPError, UnicodeDecodeError):
                         pass
                     logger.error(f"Inference failed ({resp.status_code}): {error_text}")
                     return JSONResponse(status_code=resp.status_code, content={"error": f"Inference failed: {error_text or 'unknown error'}"})
@@ -1417,7 +1417,7 @@ async def proxy_ollama(request: Request):
                          request_headers=dict(request.headers)),
             media_type="application/x-ndjson" if is_native else "text/event-stream"
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Orchestration Error: {e}")
         return JSONResponse(status_code=500, content={"error": "Internal orchestration error."})
     finally:
@@ -1448,14 +1448,14 @@ def _command_response(text: str, is_streaming: bool = False, is_native: bool = F
 
     async def _generator():
         if is_native:
-            yield f"{json.dumps({'model': 'Bob', 'message': {'role': 'assistant', 'content': text}, 'done': False})}\n".encode('utf-8')
-            yield f"{json.dumps({'model': 'Bob', 'done': True})}\n".encode('utf-8')
+            yield f"{json.dumps({'model': 'Bob', 'message': {'role': 'assistant', 'content': text}, 'done': False})}\n".encode()
+            yield f"{json.dumps({'model': 'Bob', 'done': True})}\n".encode()
         else:
             chunk = {
                 "id": "chatcmpl-Bob", "object": "chat.completion.chunk", "created": int(time.time()), "model": "Bob",
                 "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
             }
-            yield f"data: {json.dumps(chunk)}\n\n".encode('utf-8')
+            yield f"data: {json.dumps(chunk)}\n\n".encode()
             yield b"data: [DONE]\n\n"
 
     return StreamingResponse(_generator(), media_type="application/x-ndjson" if is_native else "text/event-stream")
@@ -1466,11 +1466,11 @@ def _execute_tool(name: str, args: dict, project_dir: str) -> str:
     path = args.get("path", "")
     if not path or not project_dir:
         return "Error: Missing path or project directory."
-        
+
     # Sanitize path
     safe_rel_path = mover.sanitize_path(path)
     abs_path = os.path.join(project_dir, safe_rel_path)
-    
+
     if name == "orchestrator_read_file":
         try:
             if not os.path.exists(abs_path):
@@ -1478,38 +1478,38 @@ def _execute_tool(name: str, args: dict, project_dir: str) -> str:
             with open(abs_path, "r", encoding="utf-8") as f:
                 content = f.read()
                 return content
-        except Exception as e:
+        except OSError as e:
             return f"Error reading file: {e}"
-            
+
     elif name == "orchestrator_build_logs":
         try:
             cmd = "docker ps -a --filter name=cline-builder --format '{{.Names}}' | head -n 1"
             container_name = subprocess.check_output(cmd, shell=True, text=True).strip()
             if not container_name:
                 return "Error: No build pipelines found."
-                
+
             logs_cmd = ["docker", "logs", "--tail", "200", container_name]
-            result = subprocess.run(logs_cmd, capture_output=True, text=True)
+            result = subprocess.run(logs_cmd, capture_output=True, text=True, check=False)
             logs_output = (result.stdout + "\n" + result.stderr).strip()
-            
+
             if not logs_output:
                 return f"Logs for {container_name} are currently empty."
-                
+
             if len(logs_output) > 5000:
                 logs_output = "... [Logs Truncated]\n" + logs_output[-5000:]
             return f"Logs for {container_name}:\n{logs_output}"
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             return f"Error fetching logs: {e}"
 
     elif name == "orchestrator_expand_dir":
         try:
             if not os.path.exists(abs_path) or not os.path.isdir(abs_path):
                 return f"Error: Directory `{safe_rel_path}` not found."
-            
+
             # List files and symbols for this dir
             skeleton = [f"[EXPANDED DIR: {safe_rel_path}]"]
             signature_re = re.compile(r"^\s*(?:class|def|function|interface|type|async\s+function)\s+([a-zA-Z0-9_]+)", re.MULTILINE)
-            
+
             for item in os.listdir(abs_path):
                 item_path = os.path.join(abs_path, item)
                 if os.path.isdir(item_path):
@@ -1523,12 +1523,12 @@ def _execute_tool(name: str, args: dict, project_dir: str) -> str:
                             skeleton.append(f"{item}")
                             for m in matches:
                                 skeleton.append(f"  - {m}")
-                    except Exception:
+                    except (OSError, UnicodeDecodeError):
                         skeleton.append(f"{item}")
             return "\n".join(skeleton)
-        except Exception as e:
+        except OSError as e:
             return f"Error expanding directory: {e}"
-            
+
     return f"Error: Unknown tool `{name}`"
 
 
@@ -1540,27 +1540,27 @@ async def _handle_agentic_request(body: dict, project_dir: str, target_url: str,
     """
     MAX_HOPS = 4
     current_hops = 0
-    
+
     original_messages = body.get("messages", [])
     # For response parsing: native Ollama format only when backend is Ollama AND client is native
     response_is_native = backend_is_ollama and is_native
-    
+
     while current_hops < MAX_HOPS:
         current_hops += 1
         logger.info(f"Agentic Loop: Hop {current_hops}/{MAX_HOPS}")
-        
+
         # We always do a NON-STREAMING call for tools
         temp_body = body.copy()
         temp_body["stream"] = False
-        
+
         try:
             resp = await http_client.post(target_url, json=temp_body, timeout=600.0)
             if resp.status_code != 200:
                 return JSONResponse(status_code=resp.status_code, content={"error": "Agentic inference failed."})
-                
+
             data = resp.json()
             message = data.get("message", {}) if response_is_native else data.get("choices", [{}])[0].get("message", {})
-            
+
             tool_calls = message.get("tool_calls", [])
             if not tool_calls:
                 # No more tools, this is the final answer
@@ -1577,10 +1577,10 @@ async def _handle_agentic_request(body: dict, project_dir: str, target_url: str,
                     if "id" in data:
                         data["id"] = "chatcmpl-Bob"
                 return JSONResponse(content=data)
-            
+
             # Execute tools and append results
             original_messages.append(message)
-            
+
             for tc in tool_calls:
                 func = tc.get("function", {})
                 name = func.get("name")
@@ -1588,12 +1588,12 @@ async def _handle_agentic_request(body: dict, project_dir: str, target_url: str,
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
-                    except Exception:
+                    except (json.JSONDecodeError, TypeError):
                         args = {}
-                
+
                 logger.info(f"Executing Tool: {name}({args})")
                 result = _execute_tool(name, args, project_dir)
-                
+
                 tool_msg = {
                     "role": "tool",
                     "name": name,
@@ -1604,13 +1604,13 @@ async def _handle_agentic_request(body: dict, project_dir: str, target_url: str,
                     "content": result
                 }
                 original_messages.append(tool_msg)
-                
+
             body["messages"] = original_messages
-            
-        except Exception as e:
+
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Agentic Loop Error: {e}")
             break
-            
+
     return JSONResponse(status_code=500, content={"error": "Agentic loop exceeded max hops or failed."})
 
 
@@ -1629,7 +1629,7 @@ async def internal_model_load(request: Request):
         async with gpu_lock:
             await _provider_load(config)
         return JSONResponse(content={"status": "ok"})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Internal model load failed: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -1652,7 +1652,7 @@ async def internal_model_unload(request: Request):
                     json={"model": model_name, "keep_alive": 0},
                     timeout=5.0
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(f"Internal Ollama unload failed: {e}")
         elif provider == "lmstudio":
             proc = await asyncio.create_subprocess_exec(
@@ -1664,18 +1664,18 @@ async def internal_model_unload(request: Request):
             await _stop_llamacpp_server(config)
 
         return JSONResponse(content={"status": "ok"})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Internal model unload failed: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-def _get_bound_project_dir(messages: list) -> Optional[str]:
+def _get_bound_project_dir(messages: list) -> str | None:
     """Finds the project directory bound to the current conversation ID."""
     conv_id = mover.get_conversation_id(messages)
     conv_dir = "conversations"
     if not os.path.exists(conv_dir):
         return None
-        
+
     for item in os.listdir(conv_dir):
         if item.endswith(f"_{conv_id}"):
             return os.path.join(conv_dir, item)
@@ -1688,31 +1688,31 @@ def _get_project_tree(project_dir: str) -> str:
         # Full tree but pruned of noise
         cmd = ["tree", project_dir, "-I", "node_modules|.git|venv|.venv|__pycache__|dist|build|public|.knowledge_base|.cline_context|.cline_logs"]
         output = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
-        
+
         # Scale guard: truncate if too large
         if len(output) > 5000:
             # Fallback to depth 1 if still too large? Or just truncate.
             return output[:5000] + "\n... [Tree truncated for context safety]"
         return output
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         return ""
 
 
 def _get_symbol_skeleton(project_dir: str) -> str:
     """Matches class and function signatures to create a project skeleton."""
     skeleton = ["[PROJECT SYMBOL SKELETON]"]
-    
+
     # Simple regex-based extraction for Python, JS/TS, etc.
     # class\s+(\w+)|function\s+(\w+)|(\w+)\s*=\s*(async\s*)?\([^)]*\)\s*=>|def\s+(\w+)
     signature_re = re.compile(r"^\s*(?:class|def|function|interface|type|async\s+function)\s+([a-zA-Z0-9_]+)", re.MULTILINE)
-    
+
     total_chars = 0
     MAX_SKELETON_CHARS = 10000
-    
+
     for root, dirs, files in os.walk(project_dir):
         # Prune dirs
         dirs[:] = [d for d in dirs if d not in ["node_modules", ".git", "venv", ".venv", "__pycache__", "dist", "build", "public", ".knowledge_base", ".cline_context", ".cline_logs"]]
-        
+
         for file in files:
             if file.endswith((".py", ".ts", ".js", ".tsx", ".jsx", ".go", ".rs", ".java", ".c", ".cpp")):
                 rel_path = os.path.relpath(os.path.join(root, file), project_dir)
@@ -1724,17 +1724,17 @@ def _get_symbol_skeleton(project_dir: str) -> str:
                             file_block = [f"\n{rel_path}"]
                             for m in matches:
                                 file_block.append(f"  - {m}")
-                            
+
                             block_str = "\n".join(file_block)
                             if total_chars + len(block_str) > MAX_SKELETON_CHARS:
                                 skeleton.append("\n... [Skeleton truncated: Use <expand_dir> or @filename for more detail]")
                                 return "\n".join(skeleton)
-                                
+
                             skeleton.append(block_str)
                             total_chars += len(block_str)
-                except Exception:
+                except (OSError, UnicodeDecodeError):
                     continue
-                    
+
     return "\n".join(skeleton)
 
 
@@ -1743,7 +1743,7 @@ def _parse_file_mentions(text: str, project_dir: str) -> str:
     mentions = re.findall(r"@([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9]+)", text)
     if not mentions:
         return ""
-        
+
     context_blocks = ["\n[REQUESTED FILE CONTENT]"]
     for filename in mentions:
         # Search for file in project_dir
@@ -1761,16 +1761,16 @@ def _parse_file_mentions(text: str, project_dir: str) -> str:
                     break
             if found_path:
                 break
-            
+
         if found_path:
             try:
                 with open(found_path, "r", encoding="utf-8") as f:
                     content = f.read()
                     # No truncation for explicit @mentions as per plan
                     context_blocks.append(f'\n<file name="{os.path.relpath(found_path, project_dir)}">\n{content}\n</file>')
-            except Exception as e:
+            except OSError as e:
                 context_blocks.append(f"\n[Error reading {filename}: {e}]")
-                
+
     return "\n".join(context_blocks) if len(context_blocks) > 1 else ""
 
 
@@ -1781,23 +1781,23 @@ def _handle_clone_command(messages: list) -> str:
         parts = last_msg.split()
         repo_url = None
         kb_url = None
-        
+
         for i, part in enumerate(parts):
-            if part.startswith("http") or part.startswith("git@"):
+            if part.startswith(("http", "git@")):
                 if i > 0 and parts[i-1] == "--kb":
                     kb_url = part
                 elif repo_url is None:
                     repo_url = part
             elif part == "--repo" and i + 1 < len(parts):
                 repo_url = parts[i+1]
-                
+
         # Resolve target_dir
         repo_url_provided = repo_url is not None
         bound_dir = _get_bound_project_dir(messages)
-        
+
         target_dir = None
         repo_name = "project"
-        
+
         if repo_url_provided:
             repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
             prefix = repo_name[:60]
@@ -1812,39 +1812,39 @@ def _handle_clone_command(messages: list) -> str:
         if os.path.exists(target_dir):
             if not kb_url:
                 return f"✅ **Project Bound:** `{repo_name}` is already linked to this conversation."
-            
+
             # If KB is provided, check if we need to clone it
             kb_dir = os.path.join(target_dir, ".knowledge_base")
             if os.path.exists(kb_dir):
                 return f"✅ **Project & KB Bound:** `{repo_name}` is already linked with its knowledge base."
-            
+
             logger.info(f"Existing project found, but KB is missing. Cloning KB from {kb_url}...")
             subprocess.run(["git", "clone", kb_url, kb_dir], check=True, capture_output=True)
             return f"✅ **Linked Knowledge Base:** Added `.knowledge_base/` to existing project `{repo_name}`."
-            
+
         subprocess.run(["git", "clone", repo_url, target_dir], check=True, capture_output=True)
-        
+
         msg = f"✅ **Cloned Repository:** `{repo_name}` into bound conversation folder.\n"
-        
+
         if kb_url:
             kb_dir = os.path.join(target_dir, ".knowledge_base")
             subprocess.run(["git", "clone", kb_url, kb_dir], check=True, capture_output=True)
             msg += "✅ **Linked Knowledge Base:** Cloned into `.knowledge_base/`.\n"
-            
+
         # Get pruned directory tree
         tree_cmd = ["tree", target_dir, "-L", "3", "-I", "node_modules|.git|venv|.venv|__pycache__|dist|build|public|.knowledge_base"]
         try:
             tree_output = subprocess.check_output(tree_cmd, text=True, stderr=subprocess.DEVNULL)
             msg += f"\n**Directory Structure:**\n```\n{tree_output}\n```"
-        except Exception:
+        except (subprocess.SubprocessError, OSError):
             pass
-            
+
         return msg
-        
+
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to clone: {e.stderr.decode('utf-8', errors='ignore') if e.stderr else e}")
         return "❌ **Clone Failed:** Process error occurred."
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return f"❌ **Error during clone:** {e}"
 
 
@@ -1893,14 +1893,14 @@ async def _trigger_build_pipeline(messages: list) -> str:
 
         # We already have target_dir from above
         abs_target_dir = os.path.abspath(target_dir)
-        
+
         # Create context directory
         context_dir = os.path.join(abs_target_dir, ".cline_context")
         os.makedirs(context_dir, exist_ok=True)
         conv_file_path = os.path.join(context_dir, "conversation.json")
 
         # 2. Save conversation for the container
-        with open(conv_file_path, "w", encoding="utf-8") as f:
+        with open(conv_file_path, "w", encoding="utf-8") as f:  # noqa: ASYNC230
             json.dump(messages, f, indent=2)
 
         # 3. Launch Docker Container (Non-blocking)
@@ -1918,9 +1918,9 @@ async def _trigger_build_pipeline(messages: list) -> str:
             "-e", "ORCHESTRATOR_URL=http://host.docker.internal:8000",
             "cline-builder"
         ]
-        
+
         logger.info(f"Launching pipeline command: {' '.join(cmd)}")
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: ASYNC220
 
         # Launch the Safety Monitor to ensure VRAM is released when container stops/deleted
         asyncio.create_task(_docker_safety_monitor(container_name))
@@ -1935,7 +1935,7 @@ async def _trigger_build_pipeline(messages: list) -> str:
             f"Tip: You can also type `!logs` to view them in chat, or ask me for build insights!"
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Failed to trigger build: {e}")
         return f"❌ **Build Trigger Failed:** {e}"
 
@@ -1945,23 +1945,23 @@ def _check_build_logs() -> str:
     try:
         cmd = "docker ps -a --filter name=cline-builder --format '{{.Names}}' | head -n 1"
         container_name = subprocess.check_output(cmd, shell=True, text=True).strip()
-        
+
         if not container_name:
             return "📭 **No build pipelines found.**"
-        
+
         logs_cmd = ["docker", "logs", "--tail", "50", container_name]
-        result = subprocess.run(logs_cmd, capture_output=True, text=True)
-        
+        result = subprocess.run(logs_cmd, capture_output=True, text=True, check=False)
+
         logs_output = (result.stdout + "\n" + result.stderr).strip()
-        
+
         if not logs_output:
             logs_output = "[No logs generated yet or container is empty]"
-            
+
         if len(logs_output) > 3000:
             logs_output = "... [truncated]\n" + logs_output[-3000:]
-            
+
         return f"📜 **Latest logs for `{container_name}`:**\n```text\n{logs_output}\n```"
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         return f"❌ **Failed to fetch logs:** {e}"
 
 
@@ -1969,20 +1969,20 @@ def _check_build_status() -> str:
     """Checks for active or recently completed cline-builder containers."""
     try:
         cmd = ["docker", "ps", "-a", "--filter", "name=cline-builder", "--format", "{{.Names}}\t{{.Status}}\t{{.RunningFor}}"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
         if not result.stdout.strip():
             return "📭 **No active or recent build pipelines found.**"
-        
+
         lines = result.stdout.strip().split("\n")
         report = ["🔍 **Build Pipeline Status:**", ""]
         for line in lines:
             name, status, age = line.split("\t")
             icon = "🟢" if "Up" in status else "⚪"
             report.append(f"{icon} `{name}`: {status} (Started {age} ago)")
-        
+
         return "\n".join(report)
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         return f"❌ **Status Check Failed:** {e}"
 
 
@@ -1995,7 +1995,7 @@ async def is_pipeline_active() -> bool:
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout, _ = await proc.communicate()
         return bool(stdout.strip())
-    except Exception as e:
+    except (asyncio.SubprocessError, OSError) as e:
         logger.warning(f"Failed to check pipeline activity: {e}")
         return False
 
@@ -2009,7 +2009,7 @@ async def _docker_safety_monitor(container_name: str):
     try:
         # Initial wait to let it start
         await asyncio.sleep(10)
-        
+
         while True:
             # Check container status
             proc = await asyncio.create_subprocess_exec(
@@ -2017,26 +2017,26 @@ async def _docker_safety_monitor(container_name: str):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, stderr = await proc.communicate()
-            
+            stdout, _stderr = await proc.communicate()
+
             if proc.returncode != 0:
                 # Container likely deleted or vanished
                 logger.info(f"[Safety Monitor] Container {container_name} vanished. Releasing VRAM.")
                 await shutdown_expert()
                 break
-            
+
             status = stdout.decode().strip().lower()
             if status == "false":
                 logger.info(f"[Safety Monitor] Container {container_name} stopped. Releasing VRAM.")
                 await shutdown_expert()
                 break
-                
+
             # Wait before next poll
             await asyncio.sleep(10)
-            
+
     except asyncio.CancelledError:
         logger.info(f"[Watchdog] Monitor for {container_name} cancelled.")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"[Watchdog] Error monitoring {container_name}: {e}")
 
 
@@ -2051,24 +2051,24 @@ async def _trigger_build_pipeline_safe(messages: list) -> str:
     if current_time - _last_build_trigger_time < 10:
         logger.warning("Duplicate build trigger ignored (cooldown).")
         return "⚠️ **Build already starting.** Please wait a few seconds for the status update."
-    
+
     _last_build_trigger_time = current_time
 
     async with gpu_lock:
         logger.info("Acquired GPU lock for pipeline trigger. Clearing VRAM...")
         # Protect VRAM from periodic cleanup while build runs
         vram_locked = True
-        
+
         # Don't kill the Expert if it is a managed llama.cpp process
         # This prevents the 'Network unreachable' error when the container starts
         expert_cfg = _resolve_config(EXPERT_MODEL)
         if expert_cfg.get("provider") != "llamacpp":
             await verified_unload(EXPERT_MODEL)
-            
+
         # Router and ComfyUI should always be cleared as they are small/fast to reload
         await verified_unload(ROUTER_MODEL)
         await free_comfyui()
-        
+
         # Now trigger the actual command
         return await _trigger_build_pipeline(messages)
 
@@ -2078,20 +2078,20 @@ def _stop_build_pipeline() -> str:
     try:
         # Get list of containers
         list_cmd = ["docker", "ps", "-a", "--filter", "name=cline-builder", "--format", "{{.Names}}"]
-        containers = subprocess.run(list_cmd, capture_output=True, text=True).stdout.strip().split("\n")
-        
+        containers = subprocess.run(list_cmd, capture_output=True, text=True, check=False).stdout.strip().split("\n")
+
         if not containers or not containers[0]:
             return "📭 **No active build pipelines to stop.**"
-        
+
         # Stop and remove them
         for name in containers:
             if name:
                 logger.info(f"Stopping container: {name}")
-                subprocess.run(["docker", "stop", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(["docker", "rm", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
+                subprocess.run(["docker", "stop", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                subprocess.run(["docker", "rm", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
         return f"🛑 **Stopped and cleared {len(containers)} build pipeline(s).**"
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         return f"❌ **Stop Command Failed:** {e}"
 
 

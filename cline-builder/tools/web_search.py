@@ -4,9 +4,10 @@ SearXNG-Exclusive Web Search CLI Tool for Cline Builder
 Queries the private SearXNG instance on the local Docker network.
 Outputs clean markdown summaries of top search results.
 """
-import sys
 import os
+import sys
 import urllib.parse
+
 import httpx
 
 SEARXNG_URL = os.environ.get("SEARXNG_URL", "http://searxng:8080")
@@ -42,7 +43,7 @@ def main():
                     break
                 else:
                     last_error = f"SearXNG returned HTTP {resp.status_code}"
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 last_error = str(e)
 
     if not data:

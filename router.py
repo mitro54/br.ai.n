@@ -1,13 +1,14 @@
 import asyncio
-import httpx
 import json
 import logging
 import os
 import re
 import time
 from contextlib import asynccontextmanager
+
+import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 # Load environment from .env file if python-dotenv is available
 try:
@@ -102,7 +103,7 @@ async def _desktop_health_monitor():
             _last_desktop_check = time.time()
         except asyncio.CancelledError:
             break
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"Desktop health monitor error: {e}")
             _desktop_online = False
         await asyncio.sleep(_desktop_check_interval)
@@ -113,7 +114,7 @@ async def _check_desktop_health() -> bool:
     try:
         resp = await http_client.get(f"{DESKTOP_ORCHESTRATOR_URL}/health", timeout=3.0)
         return resp.status_code == 200
-    except Exception:
+    except (httpx.HTTPError, OSError):
         return False
 
 
@@ -151,7 +152,7 @@ async def _send_wol() -> bool:
     except httpx.ConnectError:
         logger.error(f"Waker service unreachable at {WAKER_URL}. Is desktop-waker.service running?")
         return False
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"WoL request failed: {e}")
         return False
 
@@ -173,7 +174,7 @@ async def _kill_desktop_gui():
             logger.info("Desktop GUI stopped to free VRAM.")
         else:
             logger.warning(f"Kill GUI returned {resp.status_code} (may already be stopped).")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"Kill GUI failed (non-critical): {e}")
 
 
@@ -200,7 +201,7 @@ async def _start_desktop_services():
             logger.warning(f"SSH startup returned code {proc.returncode}: {stderr.decode().strip()}")
     except asyncio.TimeoutError:
         logger.warning("SSH startup timed out (services may still be starting).")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"SSH startup failed: {e}")
 
 
@@ -309,7 +310,7 @@ async def analyze_request(messages: list) -> dict:
                 "followups": bool(data.get("expect_followups", False)),
                 "is_coding": bool(data.get("is_coding", False))
             }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"Triage error: {e}")
 
     return {"complexity": 1, "followups": False, "is_coding": False}
@@ -348,9 +349,8 @@ def _classify_request(messages: list) -> str:
                 return "desktop"
 
     # --- Project Context (@file mentions) ---
-    if "@" in last_content and role == "user":
-        if re.search(r"@[a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+", last_content):
-            return "desktop"
+    if "@" in last_content and role == "user" and re.search(r"@[a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+", last_content):
+        return "desktop"
 
     # --- Image Generation Intent ---
     image_triggers = [
@@ -484,7 +484,7 @@ async def _proxy_stream_local(url: str, body: dict, is_native: bool):
                         yield f"data: {json.dumps(data)}\n\n".encode()
                     except json.JSONDecodeError:
                         yield f"{line}\n\n".encode()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Local stream error: {e}")
         yield _error_chunk(str(e), is_native)
 
@@ -510,7 +510,7 @@ async def _proxy_stream_desktop(url: str, body: dict, is_native: bool, headers: 
     except httpx.ConnectError:
         logger.error("Desktop connection refused — orchestrator may not be running.")
         yield _error_chunk("Desktop orchestrator is not responding. It may still be starting up.", is_native)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Desktop stream error: {e}")
         yield _error_chunk(f"Desktop unreachable: {e}", is_native)
 
@@ -650,7 +650,7 @@ async def _handle_locally(body: dict, path: str, is_native: bool,
             if "id" in data:
                 data["id"] = "chatcmpl-Bob"
             return JSONResponse(content=data)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Local inference failed: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -709,7 +709,7 @@ async def _forward_to_desktop(body: dict, path: str, is_native: bool, is_streami
             return JSONResponse(status_code=502, content={
                 "error": "Desktop orchestrator is not responding."
             })
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Desktop forward failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"Desktop unreachable: {e}"})
 

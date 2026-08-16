@@ -4,8 +4,9 @@ Safe Web Documentation / Page Fetcher for Cline Builder
 Fetches a webpage, strips scripts and styles, and prints sanitized readable text.
 Limits character count to 6000 characters to protect LLM context windows.
 """
-import sys
 import re
+import sys
+
 import httpx
 
 MAX_CHARS = 6000
@@ -18,7 +19,7 @@ def sanitize_html(html: str) -> str:
     cleaned = re.sub(r'<header.*?</header>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r'<footer.*?</footer>>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r'<nav.*?</nav>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-    
+
     # Convert headings and paragraphs
     cleaned = re.sub(r'<h[1-6][^>]*>(.*?)</h[1-6]>', r'\n\n### \1\n', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'<p[^>]*>(.*?)</p>', r'\n\1\n', cleaned, flags=re.DOTALL | re.IGNORECASE)
@@ -28,7 +29,7 @@ def sanitize_html(html: str) -> str:
 
     # Strip remaining HTML tags
     cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
-    
+
     # Normalize whitespace and HTML entities
     cleaned = cleaned.replace('&quot;', '"').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&nbsp;', ' ')
     cleaned = re.sub(r'[ \t]+', ' ', cleaned)
@@ -64,7 +65,7 @@ def main():
 
             print(f"### Documentation from `{url}`:\n")
             print(text)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Error fetching page: {e}")
         sys.exit(1)
 
